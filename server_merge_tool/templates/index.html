@@ -232,11 +232,11 @@
                             {% for item in swap_preview %}
                             <div class="preview-item">
                                 <div class="ids">
-                                    <span>{{ item.Swap_Pair_ID_1 }}</span>
+                                    <span>{{ item['交换区服1'] }}</span>
                                     <span>↔</span>
-                                    <span>{{ item.Swap_Pair_ID_2 }}</span>
+                                    <span>{{ item['交换区服2'] }}</span>
                                 </div>
-                                <div class="reason">Row {{ item.Original_Row_Index_1 }} ↔ Row {{ item.Original_Row_Index_2 }}</div>
+                                <div class="reason">Row {{ item['原始行号1'] }} ↔ Row {{ item['原始行号2'] }}</div>
                             </div>
                             {% endfor %}
                         {% else %}
