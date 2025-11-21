@@ -3,61 +3,194 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>合服预演分析工具</title>
+    <title>Server Merge Analyzer Pro</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        .container { background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { color: #333; text-align: center; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        textarea { width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        input[type="file"] { display: block; width: 100%; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; }
-        button { background-color: #4CAF50; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }
-        button:hover { background-color: #45a049; }
-        .result-box { margin-top: 30px; padding: 20px; background-color: #e8f5e9; border-radius: 8px; border-left: 5px solid #4CAF50; }
-        .download-links { display: flex; gap: 20px; margin-top: 15px; }
-        .btn-download { display: inline-block; padding: 10px 20px; background-color: #2196F3; color: white; text-decoration: none; border-radius: 4px; }
-        .btn-download:hover { background-color: #0b7dda; }
+        :root {
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --border: #e2e8f0;
+            --log-bg: #0f172a;
+            --log-text: #e2e8f0;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); line-height: 1.5; height: 100vh; overflow: hidden; }
+        
+        .app-container { display: grid; grid-template-columns: 400px 1fr; height: 100vh; }
+        
+        /* Sidebar (Input) */
+        .sidebar { background: var(--card-bg); border-right: 1px solid var(--border); padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; box-shadow: 4px 0 24px rgba(0,0,0,0.02); }
+        .header { margin-bottom: 2rem; }
+        .header h1 { font-size: 1.25rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; }
+        .header .badge { background: #eff6ff; color: var(--primary); font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; }
+
+        .form-group { margin-bottom: 1.5rem; }
+        .form-label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-main); }
+        .form-hint { font-size: 0.75rem; color: var(--text-sub); margin-bottom: 0.5rem; }
+        
+        .file-input-wrapper { position: relative; border: 2px dashed var(--border); border-radius: 0.5rem; padding: 1.5rem; text-align: center; transition: all 0.2s; cursor: pointer; }
+        .file-input-wrapper:hover { border-color: var(--primary); background: #eff6ff; }
+        .file-input-wrapper input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .file-status { font-size: 0.875rem; color: var(--text-sub); margin-top: 0.5rem; }
+
+        textarea { width: 100%; height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-family: monospace; font-size: 0.875rem; resize: vertical; outline: none; transition: border 0.2s; }
+        textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+
+        .btn-primary { width: 100%; background-color: var(--primary); color: white; padding: 0.75rem; border: none; border-radius: 0.375rem; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 1rem; }
+        .btn-primary:hover { background-color: var(--primary-hover); }
+
+        /* Main Content (Output) */
+        .main-content { padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; gap: 2rem; }
+        
+        /* Log Panel */
+        .log-panel { background: var(--log-bg); border-radius: 0.5rem; padding: 1.5rem; font-family: 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 0.875rem; color: var(--log-text); height: 100%; overflow-y: auto; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .log-title { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; display: flex; justify-content: space-between; }
+        .log-entry { margin-bottom: 0.5rem; display: flex; gap: 0.75rem; }
+        .log-time { color: #64748b; flex-shrink: 0; }
+        .log-level { font-weight: bold; width: 60px; flex-shrink: 0; }
+        .log-level.INFO { color: #60a5fa; }
+        .log-level.WARN { color: #fbbf24; }
+        .log-level.ERROR { color: #f87171; }
+        .log-level.SUCCESS { color: #34d399; }
+        .log-msg { word-break: break-all; }
+
+        /* Stats Cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+        .stat-card { background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .stat-label { font-size: 0.875rem; color: var(--text-sub); margin-bottom: 0.5rem; }
+        .stat-value { font-size: 2rem; font-weight: 700; color: var(--text-main); }
+        .stat-card.alert .stat-value { color: #ef4444; }
+        .stat-card.swap .stat-value { color: #f59e0b; }
+
+        /* Download Section */
+        .download-section { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .btn-download { display: inline-flex; align-items: center; padding: 0.75rem 1.5rem; border-radius: 0.375rem; text-decoration: none; font-weight: 500; font-size: 0.875rem; transition: all 0.2s; border: 1px solid transparent; }
+        .btn-download.csv { background: white; border-color: var(--border); color: var(--text-main); }
+        .btn-download.csv:hover { background: #f1f5f9; }
+        .btn-download.xlsx { background: #10b981; color: white; }
+        .btn-download.xlsx:hover { background: #059669; }
+        
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-sub); text-align: center; }
+        .empty-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
+
+        /* Helper classes */
+        .hidden { display: none; }
+        
+        @media (max-width: 768px) {
+            .app-container { grid-template-columns: 1fr; height: auto; overflow: visible; }
+            .sidebar { height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>合服预演数据分析</h1>
-        
-        {% if success %}
-        <div class="result-box">
-            <h2>处理完成!</h2>
-            <p>发现警报组: <strong>{{ alert_count }}</strong></p>
-            <p>交换区服组: <strong>{{ swap_count }}</strong></p>
-            <div class="download-links">
-                <a href="/download/{{ alert_csv }}" class="btn-download">下载警报 CSV</a>
-                <a href="/download/{{ swapped_csv }}" class="btn-download" style="background-color: #FF9800;">下载交换记录 CSV</a>
-                <a href="/download/{{ result_xlsx }}" class="btn-download">下载结果 XLSX</a>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="header">
+                <h1>Server Merge Tool <span class="badge">v2.0</span></h1>
+                <p style="color: var(--text-sub); font-size: 0.875rem; margin-top: 0.5rem;">智能合服数据分析与校验系统</p>
             </div>
-            <p style="margin-top:15px"><a href="/">返回重新处理</a></p>
-        </div>
-        {% else %}
-        <form action="/" method="post" enctype="multipart/form-data">
-            <div class="form-group">
-                <label>1. 上传数据 CSV (支持多选)</label>
-                <input type="file" name="csv_files" accept=".csv" multiple required>
+
+            <form action="/" method="post" enctype="multipart/form-data" id="analysisForm">
+                <div class="form-group">
+                    <label class="form-label">1. 上传服务器数据 (CSV)</label>
+                    <div class="form-hint">支持多选，系统将自动合并处理</div>
+                    <div class="file-input-wrapper">
+                        <input type="file" name="csv_files" accept=".csv" multiple required onchange="updateFileStatus(this, 'csv-status')">
+                        <div id="csv-status">点击或拖拽文件至此</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">2. 上传合服计划 (XLSX)</label>
+                    <div class="form-hint">包含“目标服”与“参与服”的配对表</div>
+                    <div class="file-input-wrapper">
+                        <input type="file" name="xlsx_file" accept=".xlsx" required onchange="updateFileStatus(this, 'xlsx-status')">
+                        <div id="xlsx-status">点击或拖拽文件至此</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">3. 待检测区服 ID 对</label>
+                    <div class="form-hint">每行一对，使用逗号分隔</div>
+                    <textarea name="pairs_text" placeholder="409474, 409370&#10;409375, 409314" required></textarea>
+                </div>
+
+                <button type="submit" class="btn-primary" onclick="this.innerHTML='处理中...'">开始分析</button>
+            </form>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            {% if success %}
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card alert">
+                    <div class="stat-label">触发警报 (组)</div>
+                    <div class="stat-value">{{ alert_count }}</div>
+                </div>
+                <div class="stat-card swap">
+                    <div class="stat-label">成功交换 (组)</div>
+                    <div class="stat-value">{{ swap_count }}</div>
+                </div>
+            </div>
+
+            <!-- Downloads -->
+            <div class="download-section">
+                <a href="/download/{{ alert_csv }}" class="btn-download csv">📥 下载警报报告 (.csv)</a>
+                <a href="/download/{{ swapped_csv }}" class="btn-download csv">📥 下载交换日志 (.csv)</a>
+                <a href="/download/{{ result_xlsx }}" class="btn-download xlsx">📊 下载处理结果 (.xlsx)</a>
+            </div>
+
+            <!-- Execution Logs -->
+            <div class="log-panel">
+                <div class="log-title">
+                    <span>EXECUTION LOGS</span>
+                    <span>LIVE TERMINAL</span>
+                </div>
+                {% for log in logs %}
+                <div class="log-entry">
+                    <span class="log-time">[{{ log.time }}]</span>
+                    <span class="log-level {{ log.level }}">{{ log.level }}</span>
+                    <span class="log-msg">{{ log.msg }}</span>
+                </div>
+                {% endfor %}
             </div>
             
-            <div class="form-group">
-                <label>2. 上传合服计划 XLSX (包含目标服/参与服)</label>
-                <input type="file" name="xlsx_file" accept=".xlsx" required>
+            {% else %}
+            <!-- Empty State -->
+            <div class="empty-state">
+                <div class="empty-icon">👋</div>
+                <h2>准备就绪</h2>
+                <p>请在左侧上传数据文件并输入检测参数，<br>分析结果将在此处实时显示。</p>
             </div>
-            
-            <div class="form-group">
-                <label>3. 输入区服 ID 对 (每行一对，逗号分隔)</label>
-                <textarea name="pairs_text" placeholder="例如：
-409474,409370
-409375,409314" required></textarea>
-            </div>
-            
-            <button type="submit">提交分析</button>
-        </form>
-        {% endif %}
+            {% endif %}
+        </main>
     </div>
+
+    <script>
+        function updateFileStatus(input, elementId) {
+            const el = document.getElementById(elementId);
+            if (input.files && input.files.length > 0) {
+                if (input.files.length === 1) {
+                    el.textContent = input.files[0].name;
+                    el.style.color = '#2563eb';
+                    el.style.fontWeight = 'bold';
+                } else {
+                    el.textContent = `已选择 ${input.files.length} 个文件`;
+                    el.style.color = '#2563eb';
+                    el.style.fontWeight = 'bold';
+                }
+            } else {
+                el.textContent = '点击或拖拽文件至此';
+                el.style.color = '#64748b';
+                el.style.fontWeight = 'normal';
+            }
+        }
+    </script>
 </body>
 </html>
