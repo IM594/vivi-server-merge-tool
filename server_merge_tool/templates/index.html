@@ -139,7 +139,16 @@
         .stat-card.alert .stat-value { color: var(--accent-alert); }
         .stat-card.swap .stat-value { color: var(--accent-swap); }
         
-        .stat-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-sub); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+        .stat-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-sub); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between; }
+        .stat-hint { font-size: 0.65rem; font-weight: 500; color: #94a3b8; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; opacity: 0; transition: opacity 0.2s; }
+        .stat-card:hover .stat-hint { opacity: 1; }
+        /* Default show hint if needed, but user said "hover can add a prompt". Actually usually prompt is to tell user TO hover. So maybe always visible? 
+           "hover can add a prompt" -> implies the prompt appears on hover? Or prompt says "hover to preview"?
+           "就说悬停可以预览" -> "Just say hover can preview". This usually means a static text telling user what to do.
+           Let's make it always visible but subtle, or fade in on card load. 
+           Actually, let's make it always visible so they know. */
+        .stat-hint { opacity: 1; } 
+
         .stat-value { font-size: 2.5rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
         
         /* Tooltip for Stat Cards - Dynamic Preview */
@@ -361,7 +370,10 @@
             <!-- Stats -->
             <div class="stats-grid">
                 <div class="stat-card alert">
-                    <div class="stat-label">发现警报组</div>
+                    <div class="stat-label">
+                        发现警报组
+                        <span class="stat-hint">悬停预览详情</span>
+                    </div>
                     <div class="stat-value">{{ alert_count }}</div>
                     <!-- Popover -->
                     <div class="preview-popover">
@@ -383,7 +395,10 @@
                     </div>
                 </div>
                 <div class="stat-card swap">
-                    <div class="stat-label">成功交换组</div>
+                    <div class="stat-label">
+                        成功交换组
+                        <span class="stat-hint">悬停预览详情</span>
+                    </div>
                     <div class="stat-value">{{ swap_count }}</div>
                     <!-- Popover -->
                     <div class="preview-popover">
