@@ -211,6 +211,7 @@ def index():
                         break
                 
                 if triggered_secondary:
+                    logger.user(f"组 {group_id} 触发二次警报 (DAU<=5)", 'WARN')
                     logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5)")
                     for pid in partners:
                         pr = get_server_info(df, pid)
@@ -224,9 +225,12 @@ def index():
             if final_alert_rows:
                 alert_df = pd.DataFrame(final_alert_rows)
                 
-                # Reorder columns: Put '警报组ID' and '警报原因' first
+                # Reorder columns: Put '真实排名' first, then '警报组ID', '警报原因'
                 cols = alert_df.columns.tolist()
-                priority_cols = ['警报组ID', '警报原因']
+                # Ensure '真实排名' is in columns (it was added during processing)
+                priority_cols = ['真实排名', '警报组ID', '警报原因']
+                # Filter out priority cols from existing cols to avoid duplication/error if missing
+                priority_cols = [c for c in priority_cols if c in cols]
                 other_cols = [c for c in cols if c not in priority_cols]
                 alert_df = alert_df[priority_cols + other_cols]
                 
