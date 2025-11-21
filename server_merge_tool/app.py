@@ -124,11 +124,16 @@ def index():
             logger.user(f"数据合并完成，共 {len(df)} 条记录")
             
             # Ensure numeric columns
-            cols_to_numeric = ['区服ID', '前2名战力之和', '最高玩家累充金额', 'DAU']
+            cols_to_numeric = ['区服ID', '前2名战力之和', '最高玩家累充金额', 'DAU', '跨服ID', 'code', '有效DAU', '当天付费账号数', '峰值在线', 'MAC_DAU', 'IP_DAU', '账号DAU', '总注册角色']
             for col in cols_to_numeric:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
+                    if col in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']: # Explicitly cast ID-like or count-like fields to int
+                         try:
+                            df[col] = df[col].astype(int)
+                         except:
+                            pass # Keep as float if int conversion fails (e.g. too large or weird values)
+
             # Sort
             logger.dev("执行数据排序: 前2名战力之和 (降序)")
             df = df.sort_values(by='前2名战力之和', ascending=False).reset_index(drop=True)
@@ -233,51 +238,72 @@ def index():
                 _, p2 = find_partner_in_xlsx(s2)
                 if p2: partners.append(p2)
                 
-                dau_alerts = []
-
-                # Check S1
-                r1 = get_server_info(df, s1)
-                if r1 is not None and r1['DAU'] <= 5:
-                    dau_alerts.append(f"{s1}本身(DAU:{int(r1['DAU'])})")
+                # Independent Secondary Checks
+                # Logic: For each server in the alerted pair (S1, S2), check their respective partners.
+                # If a Low DAU situation is found (either the server itself or its partner),
+                # create a NEW, INDEPENDENT alert group for that pair (Server + Partner).
                 
-                # Check S2
-                r2 = get_server_info(df, s2)
-                if r2 is not None and r2['DAU'] <= 5:
-                    dau_alerts.append(f"{s2}本身(DAU:{int(r2['DAU'])})")
+                # Helper to process secondary pair
+                def process_secondary_pair(main_id, partner_id):
+                    if not partner_id:
+                        return
 
-                # Check S1 Partner
-                _, p1 = find_partner_in_xlsx(s1)
-                if p1: 
-                    partners.append(p1)
-                    rp1 = get_server_info(df, p1)
-                    if rp1 is not None and rp1['DAU'] <= 5:
-                         dau_alerts.append(f"{s1}关联服{p1}(DAU:{int(rp1['DAU'])})")
-
-                # Check S2 Partner
-                _, p2 = find_partner_in_xlsx(s2)
-                if p2: 
-                    partners.append(p2)
-                    rp2 = get_server_info(df, p2)
-                    if rp2 is not None and rp2['DAU'] <= 5:
-                         dau_alerts.append(f"{s2}关联服{p2}(DAU:{int(rp2['DAU'])})")
-                
-                if dau_alerts:
-                    details = ", ".join(dau_alerts)
-                    logger.user(f"组 {group_id} 触发二次警报: DAU过低 [{details}]", 'WARN')
-                    logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5) - {details}")
+                    main_row = get_server_info(df, main_id)
+                    partner_row = get_server_info(df, partner_id)
                     
-                    secondary_alert_groups.append({
-                        'ids': [s1, s2],
-                        'reason': f"关联服DAU过低: {details}"
-                    })
-
-                    for pid in partners:
-                        pr = get_server_info(df, pid)
-                        if pr is not None:
-                            pr_dict = pr.to_dict()
-                            pr_dict['警报组ID'] = group_id
-                            pr_dict['警报原因'] = f"二次查询DAU过低 [{details}]"
+                    # Check DAU conditions
+                    alerts = []
+                    if main_row is not None and main_row['DAU'] <= 5:
+                        alerts.append(f"{main_id}本身DAU过低({int(main_row['DAU'])})")
+                    if partner_row is not None and partner_row['DAU'] <= 5:
+                        alerts.append(f"关联服{partner_id}DAU过低({int(partner_row['DAU'])})")
+                        
+                    if alerts:
+                        # Create a unique group for this secondary relationship
+                        # Sort IDs to ensure consistent Group ID (e.g. Group_Small_Big)
+                        pair_ids = sorted([main_id, partner_id])
+                        sec_group_id = f"Group_{pair_ids[0]}_{pair_ids[1]}"
+                        reason_str = " | ".join(alerts)
+                        
+                        # Log it
+                        logger.user(f"触发独立二次警报: {sec_group_id} - {reason_str}", 'WARN')
+                        
+                        # Add to summary list for frontend
+                        secondary_alert_groups.append({
+                            'ids': pair_ids,
+                            'reason': reason_str
+                        })
+                        
+                        # Add rows to CSV data
+                        # 1. Add Main Server Row
+                        if main_row is not None:
+                            r_dict = main_row.to_dict()
+                            r_dict['警报组ID'] = sec_group_id
+                            r_dict['警报原因'] = reason_str
+                            # Force int type for ID fields in dict if they became float
+                            for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
+                                if k in r_dict and isinstance(r_dict[k], float):
+                                    r_dict[k] = int(r_dict[k])
+                            final_alert_rows.append(r_dict)
+                            
+                        # 2. Add Partner Row
+                        if partner_row is not None:
+                            pr_dict = partner_row.to_dict()
+                            pr_dict['警报组ID'] = sec_group_id
+                            pr_dict['警报原因'] = reason_str
+                            # Force int type for ID fields in dict if they became float
+                            for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
+                                if k in pr_dict and isinstance(pr_dict[k], float):
+                                    pr_dict[k] = int(pr_dict[k])
                             final_alert_rows.append(pr_dict)
+
+                # Check S1 and its partner
+                _, p1 = find_partner_in_xlsx(s1)
+                process_secondary_pair(s1, p1)
+
+                # Check S2 and its partner
+                _, p2 = find_partner_in_xlsx(s2)
+                process_secondary_pair(s2, p2)
 
             # Create Alert CSV with optimized formatting
             if final_alert_rows:
