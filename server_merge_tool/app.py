@@ -214,6 +214,7 @@ def index():
                 return None, None
 
             final_alert_rows = [] 
+            secondary_alert_groups = []
             
             for group in alert_groups:
                 group_id = f"Group_{group['ids'][0]}_{group['ids'][1]}"
@@ -232,18 +233,44 @@ def index():
                 _, p2 = find_partner_in_xlsx(s2)
                 if p2: partners.append(p2)
                 
-                to_check = [s1, s2] + partners
                 dau_alerts = []
+
+                # Check S1
+                r1 = get_server_info(df, s1)
+                if r1 is not None and r1['DAU'] <= 5:
+                    dau_alerts.append(f"{s1}本身(DAU:{int(r1['DAU'])})")
                 
-                for cid in to_check:
-                    cr = get_server_info(df, cid)
-                    if cr is not None and cr['DAU'] <= 5:
-                        dau_alerts.append(f"{cid}(DAU:{int(cr['DAU'])})")
+                # Check S2
+                r2 = get_server_info(df, s2)
+                if r2 is not None and r2['DAU'] <= 5:
+                    dau_alerts.append(f"{s2}本身(DAU:{int(r2['DAU'])})")
+
+                # Check S1 Partner
+                _, p1 = find_partner_in_xlsx(s1)
+                if p1: 
+                    partners.append(p1)
+                    rp1 = get_server_info(df, p1)
+                    if rp1 is not None and rp1['DAU'] <= 5:
+                         dau_alerts.append(f"{s1}关联服{p1}(DAU:{int(rp1['DAU'])})")
+
+                # Check S2 Partner
+                _, p2 = find_partner_in_xlsx(s2)
+                if p2: 
+                    partners.append(p2)
+                    rp2 = get_server_info(df, p2)
+                    if rp2 is not None and rp2['DAU'] <= 5:
+                         dau_alerts.append(f"{s2}关联服{p2}(DAU:{int(rp2['DAU'])})")
                 
                 if dau_alerts:
                     details = ", ".join(dau_alerts)
                     logger.user(f"组 {group_id} 触发二次警报: DAU过低 [{details}]", 'WARN')
                     logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5) - {details}")
+                    
+                    secondary_alert_groups.append({
+                        'ids': [s1, s2],
+                        'reason': f"关联服DAU过低: {details}"
+                    })
+
                     for pid in partners:
                         pr = get_server_info(df, pid)
                         if pr is not None:
@@ -395,8 +422,10 @@ def index():
                                    swapped_csv='swapped_log.csv',
                                    result_xlsx='result_plan.xlsx',
                                    alert_count=len(alert_groups),
+                                   secondary_alert_count=len(secondary_alert_groups),
                                    swap_count=actual_swapped_count,
                                    alert_preview=alert_groups[:10], # Pass top 10 for preview
+                                   secondary_alert_preview=secondary_alert_groups[:10],
                                    swap_preview=swapped_log_data[:10]) # Pass top 10 for preview
 
         except Exception as e:
