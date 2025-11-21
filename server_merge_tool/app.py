@@ -38,8 +38,12 @@ class ExecutionLogger:
 
 def parse_server_pairs(text):
     pairs = []
+    seen = set()
+    duplicates = []
+    
     if not text:
-        return pairs
+        return pairs, duplicates
+        
     lines = text.strip().split('\n')
     for line in lines:
         parts = line.replace('，', ',').split(',')
@@ -47,10 +51,18 @@ def parse_server_pairs(text):
             try:
                 s1 = int(parts[0].strip())
                 s2 = int(parts[1].strip())
-                pairs.append((s1, s2))
+                
+                # Sort tuple to treat (A, B) same as (B, A)
+                pair_key = tuple(sorted((s1, s2)))
+                
+                if pair_key in seen:
+                    duplicates.append(f"{s1} ↔ {s2}")
+                else:
+                    seen.add(pair_key)
+                    pairs.append((s1, s2))
             except ValueError:
                 continue
-    return pairs
+    return pairs, duplicates
 
 def get_server_info(df, server_id):
     row = df[df['区服ID'] == server_id]
@@ -113,8 +125,17 @@ def index():
             df['真实排名'] = df.index + 1
             total_servers = len(df)
             
-            input_pairs = parse_server_pairs(pairs_text)
-            logger.user(f"解析输入：共 {len(input_pairs)} 组待检测区服")
+            input_pairs, duplicates = parse_server_pairs(pairs_text)
+            
+            if duplicates:
+                logger.user(f"发现并忽略 {len(duplicates)} 组重复检测对", 'WARN')
+                if len(duplicates) <= 5:
+                    for dup in duplicates:
+                        logger.dev(f"忽略重复: {dup}", 'WARN')
+                else:
+                    logger.dev(f"重复列表 (前5个): {', '.join(duplicates[:5])}...", 'WARN')
+            
+            logger.user(f"解析输入：共 {len(input_pairs)} 组有效检测区服")
             
             alert_groups = [] 
             normal_groups = [] 
@@ -202,23 +223,23 @@ def index():
                 if p2: partners.append(p2)
                 
                 to_check = [s1, s2] + partners
-                triggered_secondary = False
+                dau_alerts = []
                 
                 for cid in to_check:
                     cr = get_server_info(df, cid)
                     if cr is not None and cr['DAU'] <= 5:
-                        triggered_secondary = True
-                        break
+                        dau_alerts.append(f"{cid}(DAU:{int(cr['DAU'])})")
                 
-                if triggered_secondary:
-                    logger.user(f"组 {group_id} 触发二次警报 (DAU<=5)", 'WARN')
-                    logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5)")
+                if dau_alerts:
+                    details = ", ".join(dau_alerts)
+                    logger.user(f"组 {group_id} 触发二次警报: DAU过低 [{details}]", 'WARN')
+                    logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5) - {details}")
                     for pid in partners:
                         pr = get_server_info(df, pid)
                         if pr is not None:
                             pr_dict = pr.to_dict()
                             pr_dict['警报组ID'] = group_id
-                            pr_dict['警报原因'] = "二次查询DAU<=5"
+                            pr_dict['警报原因'] = f"二次查询DAU过低 [{details}]"
                             final_alert_rows.append(pr_dict)
 
             # Create Alert CSV with optimized formatting
