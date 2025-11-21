@@ -13,7 +13,13 @@ instance/
 # Project specific
 server_merge_tool/uploads/
 server_merge_tool/downloads/
+server_merge_tool/build/
+server_merge_tool/dist/
+*.spec
 *.DS_Store
+
+# Ignore other projects
+chat-usage-tracker/
 
 # IDE
 .idea/
