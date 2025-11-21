@@ -229,6 +229,18 @@ def index():
                         r_dict = r.to_dict()
                         r_dict['警报组ID'] = group_id
                         r_dict['警报原因'] = group['reason']
+                        
+                        # Force int type for ID fields in dict if they became float
+                        for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
+                            if k in r_dict:
+                                try:
+                                    if isinstance(r_dict[k], float):
+                                        r_dict[k] = int(r_dict[k])
+                                    elif isinstance(r_dict[k], (int, float)): # Ensure even numpy ints are python ints
+                                         r_dict[k] = int(r_dict[k])
+                                except:
+                                    pass
+
                         final_alert_rows.append(r_dict)
                         
                 s1, s2 = group['ids'][0], group['ids'][1]
@@ -309,14 +321,23 @@ def index():
             if final_alert_rows:
                 alert_df = pd.DataFrame(final_alert_rows)
                 
-                # Reorder columns: Put '真实排名' first, then '警报组ID', '警报原因'
-                cols = alert_df.columns.tolist()
-                # Ensure '真实排名' is in columns (it was added during processing)
-                priority_cols = ['真实排名', '警报组ID', '警报原因']
-                # Filter out priority cols from existing cols to avoid duplication/error if missing
-                priority_cols = [c for c in priority_cols if c in cols]
-                other_cols = [c for c in cols if c not in priority_cols]
-                alert_df = alert_df[priority_cols + other_cols]
+                # Define columns to keep
+                # Base cols from user requirement
+                base_cols_to_keep = [
+                    '区服ID', 'DAU', '近3日收入', '近7日收入', 
+                    '第一名战力', '第二名战力', '第三名战力', 
+                    '前2名战力之和', '前3名战力之和', 
+                    '前十平均战力', '前十平均等级', '最高玩家累充金额'
+                ]
+                # Added cols by logic
+                added_cols_to_keep = ['真实排名', '警报组ID', '警报原因']
+                
+                all_keep_cols = added_cols_to_keep + base_cols_to_keep
+                
+                # Filter columns: intersection of what we want and what exists
+                final_cols = [c for c in all_keep_cols if c in alert_df.columns]
+                
+                alert_df = alert_df[final_cols]
                 
                 # Add empty rows between groups for visual separation
                 # Convert to list of dicts to easily insert rows
@@ -328,8 +349,8 @@ def index():
                 
                 for _, row in alert_df.iterrows():
                     if current_group is not None and row['警报组ID'] != current_group:
-                        # Insert empty row (dict with all NaN/None)
-                        empty_row = {c: None for c in alert_df.columns}
+                        # Insert empty row (dict with all empty strings to prevent float promotion)
+                        empty_row = {c: "" for c in alert_df.columns}
                         output_rows.append(empty_row)
                     
                     output_rows.append(row.to_dict())
