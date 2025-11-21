@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Usage</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            gap: 20px;
+            overflow: hidden; /* 禁止滚动 */
+        }
+
+        .widget-container {
+            background-color: #1c1c1c;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            width: 800px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            flex-shrink: 0; /* 防止被压缩 */
+        }
+
+        /* ... (保留进度条样式) ... */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 15px;
+        }
+
+        .title { font-size: 16px; font-weight: 600; color: #fff; }
+        .subtitle { font-size: 13px; color: #888; margin-top: 4px; }
+        .date-range { font-size: 13px; color: #888; }
+        .progress-bar { display: flex; height: 40px; gap: 2px; margin-bottom: 10px; background: #2a2a2a; border-radius: 4px; overflow: hidden; }
+        .bar-segment { flex: 1; background-color: #333; transition: background-color 0.3s; }
+        .bar-segment.user-active { background-color: #e67e22; }
+        .bar-segment.org-active { background-color: #d35400; }
+        .footer { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-top: 12px; }
+        .legend { display: flex; gap: 15px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+        .val-display { color: #fff; font-family: monospace; }
+        #loading { text-align: center; color: #666; }
+
+        /* Tab 样式 */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            width: 800px;
+        }
+        .tab-btn {
+            background: #2a2a2a;
+            border: 1px solid #333;
+            color: #888;
+            padding: 6px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            background: #333;
+            color: #ccc;
+        }
+        .tab-btn.active {
+            background: #e67e22;
+            border-color: #e67e22;
+            color: #fff;
+        }
+
+        .chart-wrapper {
+            background-color: #1c1c1c;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            width: 800px;
+            height: 350px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+            font-size: 13px;
+            color: #888;
+        }
+
+        .highlight-stat {
+            color: #e67e22;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Widget 1: 总量进度条 -->
+    <div class="widget-container" id="widget" style="display:none">
+        <div class="header">
+            <div>
+                <div class="title">Standard Tokens - Free Trial</div>
+                <div class="subtitle">
+                    <span id="percent-remaining" style="color:#fff;font-weight:bold;">--%</span> remaining 
+                    (<span id="total-allowance">...</span> total)
+                </div>
+            </div>
+            <div class="date-range" id="date-range">...</div>
+        </div>
+        
+        <div class="progress-bar" id="p-bar"></div>
+        
+        <div class="footer">
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background: #e67e22"></div>Your usage</div>
+                <div class="legend-item"><div class="legend-dot" style="background: #d35400"></div>Team's usage</div>
+            </div>
+            <div class="val-display"><span id="used-val">0</span> used</div>
+        </div>
+
+        <div class="stats-row">
+            <div id="forecast-info">Calculating forecast...</div>
+            <div class="val-display" style="color:#666">Total: <span id="total-val-sub">0</span></div>
+        </div>
+    </div>
+
+    <!-- Tab 切换 -->
+    <div class="tabs">
+        <div class="tab-btn active" onclick="switchTab('delta')">Speed (Delta)</div>
+        <div class="tab-btn" onclick="switchTab('cumulative')">Total (Cumulative)</div>
+        <!-- 热力图需要更多数据处理，先做这两个基础的 -->
+    </div>
+
+    <!-- Widget 2: 图表 -->
+    <div class="chart-wrapper" id="trend-chart"></div>
+    
+    <div id="loading">Loading data...</div>
+
+    <script>
+        const SEGMENT_COUNT = 120;
+        const barContainer = document.getElementById('p-bar');
+        let chartInstance = null;
+        let currentTab = 'delta';
+        let cachedHistory = [];
+
+        function initBar() {
+            barContainer.innerHTML = '';
+            for (let i = 0; i < SEGMENT_COUNT; i++) {
+                const div = document.createElement('div');
+                div.className = 'bar-segment';
+                barContainer.appendChild(div);
+            }
+        }
+
+        const fmt = (n) => n.toLocaleString('en-US');
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.innerText.toLowerCase().includes(tab));
+            });
+            if (cachedHistory.length > 0) {
+                renderChart(cachedHistory);
+            }
+        }
+
+        async function update() {
+            try {
+                // 1. 获取最新状态
+                const resLatest = await fetch('/api/latest');
+                const latestData = await resLatest.json();
+                
+                if (latestData.userTokens == null) return;
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('widget').style.display = 'block';
+
+                // 更新进度条 UI
+                const totalAllowance = latestData.allowance;
+                const userUsed = latestData.userTokens;
+                const totalUsed = latestData.orgTokens;
+
+                // Remaining Percentage
+                const remainingPercent = ((totalAllowance - totalUsed) / totalAllowance * 100).toFixed(1);
+                const percentEl = document.getElementById('percent-remaining');
+                if (percentEl) {
+                    percentEl.innerText = remainingPercent + '%';
+                    if (parseFloat(remainingPercent) < 10) percentEl.style.color = '#e74c3c';
+                    else percentEl.style.color = '#fff';
+                }
+
+                document.getElementById('total-allowance').innerText = fmt(totalAllowance);
+                document.getElementById('used-val').innerText = fmt(userUsed);
+                const totalValSub = document.getElementById('total-val-sub');
+                if (totalValSub) totalValSub.innerText = fmt(totalAllowance);
+                
+                const startDate = new Date(latestData.raw.usage.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const endDate = new Date(latestData.raw.usage.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                document.getElementById('date-range').innerText = `${startDate} - ${endDate}`;
+
+                const userSegments = Math.floor((userUsed / totalAllowance) * SEGMENT_COUNT);
+                const orgSegments = Math.floor((totalUsed / totalAllowance) * SEGMENT_COUNT);
+                const segments = document.getElementsByClassName('bar-segment');
+                
+                for (let i = 0; i < SEGMENT_COUNT; i++) {
+                    segments[i].className = 'bar-segment';
+                    if (i < userSegments) segments[i].classList.add('user-active');
+                    else if (i < orgSegments) segments[i].classList.add('org-active');
+                }
+
+                // 2. 获取历史数据
+                const resHistory = await fetch('/api/history');
+                cachedHistory = await resHistory.json();
+                cachedHistory.sort((a, b) => a.timestamp - b.timestamp);
+
+                // Update Forecast
+                const forecastEl = document.getElementById('forecast-info');
+                if (cachedHistory.length > 1 && forecastEl) {
+                    const oldest = cachedHistory[0];
+                    const newest = cachedHistory[cachedHistory.length - 1];
+                    const timeSpan = newest.timestamp - oldest.timestamp;
+                    const valSpan = newest.value - oldest.value;
+                    
+                    const totalRemaining = totalAllowance - totalUsed;
+
+                    if (timeSpan > 0 && valSpan > 0) {
+                        const rate = valSpan / timeSpan; // tokens per ms
+                        const msLeft = totalRemaining / rate;
+                        const hoursLeft = msLeft / (1000 * 60 * 60);
+                        
+                        let runwayText = '';
+                        if (hoursLeft > 8760) runwayText = '> 1 year';
+                        else runwayText = `${hoursLeft.toFixed(1)} hours`;
+
+                        forecastEl.innerHTML = `Est. runway: <span class="highlight-stat">${runwayText}</span>`;
+                        
+                        if (timeSpan < 24 * 60 * 60 * 1000) {
+                            forecastEl.innerHTML += ' <span style="font-size:10px;color:#555">(based on recent usage)</span>';
+                        }
+                    } else {
+                         forecastEl.innerText = 'Est. runway: Stable';
+                    }
+                }
+                
+                renderChart(cachedHistory);
+
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function renderChart(data) {
+            const container = document.getElementById('trend-chart');
+            
+            if (!data || data.length === 0) {
+                if (chartInstance) chartInstance.dispose();
+                container.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#666;">Waiting for data... (0 records)</div>';
+                return;
+            }
+            
+            if (!chartInstance || chartInstance.isDisposed()) {
+                // 清除可能的 loading 文字
+                container.innerHTML = '';
+                chartInstance = echarts.init(container);
+            }
+
+            const dates = [];
+            const values = [];
+            const deltas = [];
+
+            for (let i = 0; i < data.length; i++) {
+                const date = new Date(data[i].timestamp);
+                dates.push([date.getHours(), date.getMinutes(), date.getSeconds()].map(n => n.toString().padStart(2, '0')).join(':'));
+                values.push(data[i].value);
+                
+                if (i > 0) {
+                    let diff = data[i].value - data[i-1].value;
+                    if (diff < 0) diff = 0;
+                    deltas.push(diff);
+                } else {
+                    deltas.push(0);
+                }
+            }
+
+            // 补点逻辑：如果只有一个点，构造水平线
+            if (data.length === 1) {
+                const d = new Date();
+                dates.push([d.getHours(), d.getMinutes(), d.getSeconds()].map(n => n.toString().padStart(2, '0')).join(':'));
+                values.push(values[0]);
+                deltas.push(0);
+            }
+
+            const baseOption = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'cross' },
+                    backgroundColor: 'rgba(30,30,30,0.9)',
+                    borderColor: '#444',
+                    textStyle: { color: '#eee' }
+                },
+                grid: { top: 40, bottom: 70, left: 15, right: 15, containLabel: true },
+                xAxis: {
+                    type: 'category',
+                    data: dates,
+                    axisLine: { lineStyle: { color: '#444' } },
+                    axisLabel: { color: '#888' },
+                    boundaryGap: false
+                },
+                yAxis: {
+                    type: 'value',
+                    splitLine: { lineStyle: { color: '#333' } },
+                    axisLabel: { color: '#888' }
+                },
+                dataZoom: [
+                    {
+                        type: 'slider',
+                        show: true,
+                        bottom: 10,
+                        height: 18,
+                        borderColor: '#333',
+                        backgroundColor: '#1c1c1c',
+                        fillerColor: 'rgba(230, 126, 34, 0.15)',
+                        handleSize: '80%',
+                        handleStyle: { color: '#e67e22' },
+                        textStyle: { color: '#666' },
+                        brushSelect: false
+                    },
+                    { type: 'inside' }
+                ]
+            };
+
+            let finalOption = {};
+
+            if (currentTab === 'delta') {
+                finalOption = {
+                    ...baseOption,
+                    title: { text: 'Usage Speed (Tokens/Min)', left: 'center', textStyle: { color: '#888', fontSize: 14 } },
+                    series: [
+                        {
+                            name: 'Total',
+                            type: 'line',
+                            data: values,
+                            showSymbol: false,
+                            lineStyle: { color: '#444', width: 1, type: 'dashed' },
+                            itemStyle: { color: '#444' },
+                            z: 1
+                        },
+                        {
+                            name: 'Delta',
+                            type: 'bar',
+                            data: deltas,
+                            itemStyle: { color: '#e67e22' },
+                            barMaxWidth: 8,
+                            z: 2
+                        }
+                    ]
+                };
+            } else if (currentTab === 'cumulative') {
+                finalOption = {
+                    ...baseOption,
+                    title: { text: 'Cumulative Usage (Total)', left: 'center', textStyle: { color: '#888', fontSize: 14 } },
+                    series: [
+                        {
+                            name: 'Total Tokens',
+                            type: 'line',
+                            data: values,
+                            showSymbol: false,
+                            lineStyle: { color: '#e67e22', width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(230, 126, 34, 0.3)' },
+                                    { offset: 1, color: 'rgba(230, 126, 34, 0)' }
+                                ])
+                            },
+                            itemStyle: { color: '#e67e22' }
+                        }
+                    ]
+                };
+            }
+
+            chartInstance.setOption(finalOption, true);
+        }
+
+        initBar();
+        update();
+        setInterval(update, 10000);
+        window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+    </script>
+</body>
+</html>

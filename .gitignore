@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Flask
+instance/
+.webassets-cache
+
+# Project specific
+server_merge_tool/uploads/
+server_merge_tool/downloads/
+*.DS_Store
+
+# IDE
+.idea/
+.vscode/
