@@ -3,86 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Server Merge Analyzer Pro</title>
+    <title>合服数据分析工具</title>
     <style>
         :root {
-            --bg-color: #f8fafc;
+            --bg-color: #f1f5f9;
             --card-bg: #ffffff;
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --text-main: #1e293b;
+            --primary: #0f172a;
+            --primary-hover: #334155;
+            --text-main: #334155;
             --text-sub: #64748b;
-            --border: #e2e8f0;
-            --log-bg: #0f172a;
+            --border: #cbd5e1;
+            --log-bg: #1e293b;
             --log-text: #e2e8f0;
+            --accent-alert: #dc2626;
+            --accent-swap: #d97706;
+            --accent-success: #059669;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); line-height: 1.5; height: 100vh; overflow: hidden; }
+        body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); line-height: 1.5; height: 100vh; overflow: hidden; }
         
-        .app-container { display: grid; grid-template-columns: 400px 1fr; height: 100vh; }
+        .app-container { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
         
-        /* Sidebar (Input) */
-        .sidebar { background: var(--card-bg); border-right: 1px solid var(--border); padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; box-shadow: 4px 0 24px rgba(0,0,0,0.02); }
-        .header { margin-bottom: 2rem; }
-        .header h1 { font-size: 1.25rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; }
-        .header .badge { background: #eff6ff; color: var(--primary); font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; }
+        /* Sidebar */
+        .sidebar { background: var(--card-bg); border-right: 1px solid var(--border); padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; }
+        .header { margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
+        .header h1 { font-size: 1.25rem; font-weight: 700; color: var(--primary); letter-spacing: -0.025em; }
+        .header p { color: var(--text-sub); font-size: 0.875rem; margin-top: 0.25rem; }
 
         .form-group { margin-bottom: 1.5rem; }
-        .form-label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-main); }
+        .form-label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--primary); }
         .form-hint { font-size: 0.75rem; color: var(--text-sub); margin-bottom: 0.5rem; }
         
-        .file-input-wrapper { position: relative; border: 2px dashed var(--border); border-radius: 0.5rem; padding: 1.5rem; text-align: center; transition: all 0.2s; cursor: pointer; }
-        .file-input-wrapper:hover { border-color: var(--primary); background: #eff6ff; }
+        .file-input-wrapper { position: relative; border: 1px solid var(--border); background: #f8fafc; border-radius: 4px; padding: 1rem; text-align: left; transition: all 0.2s; }
+        .file-input-wrapper:hover { border-color: var(--text-sub); }
         .file-input-wrapper input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-        .file-status { font-size: 0.875rem; color: var(--text-sub); margin-top: 0.5rem; }
+        .file-status { font-size: 0.875rem; color: var(--text-main); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-status.placeholder { color: var(--text-sub); font-weight: 400; }
 
-        textarea { width: 100%; height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-family: monospace; font-size: 0.875rem; resize: vertical; outline: none; transition: border 0.2s; }
-        textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+        textarea { width: 100%; height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 4px; font-family: "Monaco", monospace; font-size: 0.875rem; resize: vertical; outline: none; background: #f8fafc; }
+        textarea:focus { border-color: var(--primary); background: white; }
+        textarea::placeholder { color: #94a3b8; }
 
-        .btn-primary { width: 100%; background-color: var(--primary); color: white; padding: 0.75rem; border: none; border-radius: 0.375rem; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 1rem; }
+        .btn-primary { width: 100%; background-color: var(--primary); color: white; padding: 0.875rem; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 0.875rem; letter-spacing: 0.025em; text-transform: uppercase; }
         .btn-primary:hover { background-color: var(--primary-hover); }
 
-        /* Main Content (Output) */
-        .main-content { padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; gap: 2rem; }
+        /* Main Content */
+        .main-content { padding: 2rem; display: flex; flex-direction: column; overflow-y: auto; gap: 1.5rem; }
         
-        /* Log Panel */
-        .log-panel { background: var(--log-bg); border-radius: 0.5rem; padding: 1.5rem; font-family: 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 0.875rem; color: var(--log-text); height: 100%; overflow-y: auto; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        .log-title { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; display: flex; justify-content: space-between; }
-        .log-entry { margin-bottom: 0.5rem; display: flex; gap: 0.75rem; }
-        .log-time { color: #64748b; flex-shrink: 0; }
-        .log-level { font-weight: bold; width: 60px; flex-shrink: 0; }
-        .log-level.INFO { color: #60a5fa; }
-        .log-level.WARN { color: #fbbf24; }
-        .log-level.ERROR { color: #f87171; }
-        .log-level.SUCCESS { color: #34d399; }
-        .log-msg { word-break: break-all; }
-
         /* Stats Cards */
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
-        .stat-card { background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .stat-label { font-size: 0.875rem; color: var(--text-sub); margin-bottom: 0.5rem; }
-        .stat-value { font-size: 2rem; font-weight: 700; color: var(--text-main); }
-        .stat-card.alert .stat-value { color: #ef4444; }
-        .stat-card.swap .stat-value { color: #f59e0b; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .stat-card { background: white; padding: 1.25rem; border: 1px solid var(--border); border-radius: 4px; border-left: 4px solid transparent; }
+        .stat-card.alert { border-left-color: var(--accent-alert); }
+        .stat-card.swap { border-left-color: var(--accent-swap); }
+        .stat-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-sub); font-weight: 600; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+        .stat-value { font-size: 1.875rem; font-weight: 700; color: var(--primary); line-height: 1; }
 
         /* Download Section */
-        .download-section { display: flex; gap: 1rem; flex-wrap: wrap; }
-        .btn-download { display: inline-flex; align-items: center; padding: 0.75rem 1.5rem; border-radius: 0.375rem; text-decoration: none; font-weight: 500; font-size: 0.875rem; transition: all 0.2s; border: 1px solid transparent; }
-        .btn-download.csv { background: white; border-color: var(--border); color: var(--text-main); }
-        .btn-download.csv:hover { background: #f1f5f9; }
-        .btn-download.xlsx { background: #10b981; color: white; }
-        .btn-download.xlsx:hover { background: #059669; }
+        .download-section { display: flex; gap: 0.75rem; flex-wrap: wrap; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+        .btn-download { display: inline-flex; align-items: center; justify-content: center; padding: 0.625rem 1.25rem; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.875rem; transition: all 0.2s; border: 1px solid var(--border); background: white; color: var(--text-main); min-width: 160px; }
+        .btn-download:hover { border-color: var(--text-sub); background: #f8fafc; }
+        .btn-download.primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn-download.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
         
-        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-sub); text-align: center; }
-        .empty-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
+        /* Log Panel */
+        .log-panel { background: var(--log-bg); border-radius: 4px; display: flex; flex-direction: column; flex: 1; min-height: 400px; border: 1px solid var(--primary); overflow: hidden; }
+        .log-header { background: #0f172a; padding: 0.75rem 1rem; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+        .log-title { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+        
+        /* Toggle Switch */
+        .toggle-wrapper { display: flex; align-items: center; gap: 0.5rem; }
+        .toggle-label { color: #94a3b8; font-size: 0.75rem; }
+        .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent-success); }
+        input:checked + .slider:before { transform: translateX(16px); }
 
-        /* Helper classes */
-        .hidden { display: none; }
+        .log-content { padding: 1rem; overflow-y: auto; font-family: "Monaco", "Consolas", monospace; font-size: 0.8rem; color: var(--log-text); flex: 1; }
+        .log-entry { margin-bottom: 0.25rem; display: flex; gap: 0.75rem; line-height: 1.6; }
+        .log-time { color: #475569; flex-shrink: 0; user-select: none; }
+        .log-msg { white-space: pre-wrap; }
         
+        /* Log Colors */
+        .log-entry.WARN .log-msg { color: #fbbf24; }
+        .log-entry.ERROR .log-msg { color: #f87171; }
+        .log-entry.SUCCESS .log-msg { color: #34d399; }
+        .log-entry.dev { color: #64748b; font-style: italic; } /* Dev logs are dimmed */
+
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-sub); text-align: center; }
+        .empty-text { font-size: 1rem; max-width: 400px; line-height: 1.6; }
+
         @media (max-width: 768px) {
             .app-container { grid-template-columns: 1fr; height: auto; overflow: visible; }
-            .sidebar { height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+            .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
         }
     </style>
 </head>
@@ -91,36 +106,36 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="header">
-                <h1>Server Merge Tool <span class="badge">v2.0</span></h1>
-                <p style="color: var(--text-sub); font-size: 0.875rem; margin-top: 0.5rem;">智能合服数据分析与校验系统</p>
+                <h1>合服分析工具</h1>
+                <p>Server Merge Analyzer v2.1</p>
             </div>
 
             <form action="/" method="post" enctype="multipart/form-data" id="analysisForm">
                 <div class="form-group">
-                    <label class="form-label">1. 上传服务器数据 (CSV)</label>
-                    <div class="form-hint">支持多选，系统将自动合并处理</div>
+                    <label class="form-label">1. 服务器数据 CSV</label>
+                    <div class="form-hint">支持多选，将自动合并</div>
                     <div class="file-input-wrapper">
                         <input type="file" name="csv_files" accept=".csv" multiple required onchange="updateFileStatus(this, 'csv-status')">
-                        <div id="csv-status">点击或拖拽文件至此</div>
+                        <div id="csv-status" class="file-status placeholder">点击选择文件...</div>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">2. 上传合服计划 (XLSX)</label>
-                    <div class="form-hint">包含“目标服”与“参与服”的配对表</div>
+                    <label class="form-label">2. 合服计划 XLSX</label>
+                    <div class="form-hint">包含目标服与参与服配对</div>
                     <div class="file-input-wrapper">
                         <input type="file" name="xlsx_file" accept=".xlsx" required onchange="updateFileStatus(this, 'xlsx-status')">
-                        <div id="xlsx-status">点击或拖拽文件至此</div>
+                        <div id="xlsx-status" class="file-status placeholder">点击选择文件...</div>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">3. 待检测区服 ID 对</label>
-                    <div class="form-hint">每行一对，使用逗号分隔</div>
+                    <label class="form-label">3. 检测ID对</label>
+                    <div class="form-hint">每行一对，逗号分隔</div>
                     <textarea name="pairs_text" placeholder="409474, 409370&#10;409375, 409314" required></textarea>
                 </div>
 
-                <button type="submit" class="btn-primary" onclick="this.innerHTML='处理中...'">开始分析</button>
+                <button type="submit" class="btn-primary" onclick="this.innerText='正在分析数据...'">开始分析</button>
             </form>
         </aside>
 
@@ -130,43 +145,49 @@
             <!-- Stats -->
             <div class="stats-grid">
                 <div class="stat-card alert">
-                    <div class="stat-label">触发警报 (组)</div>
+                    <div class="stat-label">发现警报组</div>
                     <div class="stat-value">{{ alert_count }}</div>
                 </div>
                 <div class="stat-card swap">
-                    <div class="stat-label">成功交换 (组)</div>
+                    <div class="stat-label">成功交换组</div>
                     <div class="stat-value">{{ swap_count }}</div>
                 </div>
             </div>
 
             <!-- Downloads -->
             <div class="download-section">
-                <a href="/download/{{ alert_csv }}" class="btn-download csv">📥 下载警报报告 (.csv)</a>
-                <a href="/download/{{ swapped_csv }}" class="btn-download csv">📥 下载交换日志 (.csv)</a>
-                <a href="/download/{{ result_xlsx }}" class="btn-download xlsx">📊 下载处理结果 (.xlsx)</a>
+                <a href="/download/{{ alert_csv }}" class="btn-download">警报报告 (.csv)</a>
+                <a href="/download/{{ swapped_csv }}" class="btn-download">交换日志 (.csv)</a>
+                <a href="/download/{{ result_xlsx }}" class="btn-download primary">处理结果 (.xlsx)</a>
             </div>
 
             <!-- Execution Logs -->
             <div class="log-panel">
-                <div class="log-title">
-                    <span>EXECUTION LOGS</span>
-                    <span>LIVE TERMINAL</span>
+                <div class="log-header">
+                    <span class="log-title">系统执行日志</span>
+                    <div class="toggle-wrapper">
+                        <span class="toggle-label">开发者模式</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="logToggle" onchange="toggleLogs()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                 </div>
-                {% for log in logs %}
-                <div class="log-entry">
-                    <span class="log-time">[{{ log.time }}]</span>
-                    <span class="log-level {{ log.level }}">{{ log.level }}</span>
-                    <span class="log-msg">{{ log.msg }}</span>
+                <div class="log-content" id="logContainer">
+                    {% for log in logs %}
+                    <div class="log-entry {{ log.level }} {{ log.category }}">
+                        <span class="log-time">{{ log.time }}</span>
+                        <span class="log-msg">{{ log.msg }}</span>
+                    </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
             </div>
             
             {% else %}
             <!-- Empty State -->
             <div class="empty-state">
-                <div class="empty-icon">👋</div>
-                <h2>准备就绪</h2>
-                <p>请在左侧上传数据文件并输入检测参数，<br>分析结果将在此处实时显示。</p>
+                <h2 style="margin-bottom: 1rem; color: var(--primary);">准备就绪</h2>
+                <p class="empty-text">请在左侧面板上传必要的数据文件并输入检测 ID。<br>分析结果和日志将显示在此区域。</p>
             </div>
             {% endif %}
         </main>
@@ -176,19 +197,31 @@
         function updateFileStatus(input, elementId) {
             const el = document.getElementById(elementId);
             if (input.files && input.files.length > 0) {
+                el.classList.remove('placeholder');
                 if (input.files.length === 1) {
                     el.textContent = input.files[0].name;
-                    el.style.color = '#2563eb';
-                    el.style.fontWeight = 'bold';
                 } else {
                     el.textContent = `已选择 ${input.files.length} 个文件`;
-                    el.style.color = '#2563eb';
-                    el.style.fontWeight = 'bold';
                 }
             } else {
-                el.textContent = '点击或拖拽文件至此';
-                el.style.color = '#64748b';
-                el.style.fontWeight = 'normal';
+                el.classList.add('placeholder');
+                el.textContent = '点击选择文件...';
+            }
+        }
+
+        function toggleLogs() {
+            const isDev = document.getElementById('logToggle').checked;
+            const devLogs = document.querySelectorAll('.log-entry.dev');
+            
+            devLogs.forEach(log => {
+                log.style.display = isDev ? 'flex' : 'none';
+            });
+        }
+
+        // Initialize logs state
+        window.onload = function() {
+            if (document.getElementById('logContainer')) {
+                toggleLogs();
             }
         }
     </script>

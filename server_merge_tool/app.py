@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import datetime
 from flask import Flask, render_template, request, send_file, send_from_directory
 from openpyxl import load_workbook
@@ -20,21 +21,20 @@ class ExecutionLogger:
     def __init__(self):
         self.logs = []
     
-    def info(self, message):
-        self._add_log('INFO', message)
-    
-    def warn(self, message):
-        self._add_log('WARN', message)
+    def user(self, message, level='INFO'):
+        self._add_log(level, message, 'user')
         
-    def error(self, message):
-        self._add_log('ERROR', message)
+    def dev(self, message, level='DEBUG'):
+        self._add_log(level, message, 'dev')
         
-    def success(self, message):
-        self._add_log('SUCCESS', message)
-        
-    def _add_log(self, level, message):
+    def _add_log(self, level, message, category):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        self.logs.append({'time': timestamp, 'level': level, 'msg': message})
+        self.logs.append({
+            'time': timestamp, 
+            'level': level, 
+            'msg': message,
+            'category': category
+        })
 
 def parse_server_pairs(text):
     pairs = []
@@ -63,7 +63,8 @@ def index():
     if request.method == 'POST':
         logger = ExecutionLogger()
         try:
-            logger.info("开始处理任务...")
+            logger.user("开始处理任务...")
+            logger.dev("初始化请求参数解析")
             
             # 1. Save files
             csv_files = request.files.getlist('csv_files')
@@ -75,10 +76,10 @@ def index():
 
             xlsx_path = os.path.join(app.config['UPLOAD_FOLDER'], 'input.xlsx')
             xlsx_file.save(xlsx_path)
-            logger.info("XLSX 计划表已上传")
+            logger.user("合服计划表 (XLSX) 上传成功")
 
             # 2. Process CSVs (Merge Multiple)
-            logger.info(f"正在合并 {len(csv_files)} 个 CSV 文件...")
+            logger.user(f"正在处理 {len(csv_files)} 个服务器数据文件...")
             dfs = []
             for i, file in enumerate(csv_files):
                 if file.filename == '':
@@ -86,16 +87,19 @@ def index():
                 temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f'input_{i}.csv')
                 file.save(temp_path)
                 try:
+                    # 尝试读取 CSV，跳过第一行
                     df_temp = pd.read_csv(temp_path, header=1)
                     dfs.append(df_temp)
+                    logger.dev(f"读取 CSV {file.filename} 成功，行数: {len(df_temp)}")
                 except Exception as e:
-                    logger.error(f"读取 CSV {file.filename} 失败: {str(e)}")
+                    logger.user(f"读取文件 {file.filename} 失败", 'ERROR')
+                    logger.dev(f"CSV 读取异常: {str(e)}", 'ERROR')
             
             if not dfs:
-                 return "No valid CSV files uploaded", 400
+                 return "没有有效的 CSV 文件", 400
                  
             df = pd.concat(dfs, ignore_index=True)
-            logger.success(f"数据合并完成，共处理 {len(df)} 条区服数据")
+            logger.user(f"数据合并完成，共 {len(df)} 条记录")
             
             # Ensure numeric columns
             cols_to_numeric = ['区服ID', '前2名战力之和', '最高玩家累充金额', 'DAU']
@@ -103,25 +107,28 @@ def index():
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
+            # Sort
+            logger.dev("执行数据排序: 前2名战力之和 (降序)")
             df = df.sort_values(by='前2名战力之和', ascending=False).reset_index(drop=True)
             df['真实排名'] = df.index + 1
             total_servers = len(df)
             
             input_pairs = parse_server_pairs(pairs_text)
-            logger.info(f"解析到 {len(input_pairs)} 组待检测区服对")
+            logger.user(f"解析输入：共 {len(input_pairs)} 组待检测区服")
             
             alert_groups = [] 
             normal_groups = [] 
             
             # 3. Primary Alert Check
+            logger.dev("开始执行初级警报检测 (Primary Check)")
             for s1, s2 in input_pairs:
                 row1 = get_server_info(df, s1)
                 row2 = get_server_info(df, s2)
                 
                 if row1 is None:
-                    logger.warn(f"区服 {s1} 在 CSV 中未找到，跳过该对")
+                    logger.user(f"警告：区服 {s1} 数据缺失，已跳过", 'WARN')
                 if row2 is None:
-                    logger.warn(f"区服 {s2} 在 CSV 中未找到，跳过该对")
+                    logger.user(f"警告：区服 {s2} 数据缺失，已跳过", 'WARN')
 
                 if row1 is None or row2 is None:
                     continue
@@ -146,15 +153,16 @@ def index():
                     if cond_b: reasons.append("高战高充(前25%)")
                     if cond_c: reasons.append("战力接近(差<=10亿)")
                     reason_str = "; ".join(reasons)
-                    logger.warn(f"触发警报 ({s1}, {s2}): {reason_str}")
-                    alert_groups.append({'ids': [s1, s2], 'reason': reason_str, 'type': 'primary'})
+                    
+                    logger.user(f"发现警报：{s1} 和 {s2} - {reason_str}", 'WARN')
+                    alert_groups.append({'ids': [s1, s2], 'reason': reason_str})
                 else:
                     normal_groups.append((s1, s2))
             
-            logger.info(f"初筛完成：{len(alert_groups)} 组警报，{len(normal_groups)} 组正常")
+            logger.user(f"检测完成：发现 {len(alert_groups)} 组警报，{len(normal_groups)} 组正常")
 
             # 4. Secondary Alert Check
-            logger.info("正在加载 XLSX 进行二次校验...")
+            logger.dev("加载 XLSX 进行二次关联检测")
             wb = load_workbook(xlsx_path)
             ws = wb.active
             
@@ -182,8 +190,8 @@ def index():
                     r = get_server_info(df, sid)
                     if r is not None:
                         r_dict = r.to_dict()
-                        r_dict['Alert_Group'] = group_id
-                        r_dict['Alert_Reason'] = group['reason']
+                        r_dict['警报组ID'] = group_id
+                        r_dict['警报原因'] = group['reason']
                         final_alert_rows.append(r_dict)
                         
                 s1, s2 = group['ids'][0], group['ids'][1]
@@ -203,25 +211,50 @@ def index():
                         break
                 
                 if triggered_secondary:
-                    logger.warn(f"二次警报触发 (组 {s1},{s2}): 关联服 DAU<=5")
+                    logger.dev(f"组 {group_id} 触发二次警报 (DAU<=5)")
                     for pid in partners:
                         pr = get_server_info(df, pid)
                         if pr is not None:
                             pr_dict = pr.to_dict()
-                            pr_dict['Alert_Group'] = group_id
-                            pr_dict['Alert_Reason'] = "二次查询DAU<=5"
+                            pr_dict['警报组ID'] = group_id
+                            pr_dict['警报原因'] = "二次查询DAU<=5"
                             final_alert_rows.append(pr_dict)
 
-            # Create Alert CSV
+            # Create Alert CSV with optimized formatting
             if final_alert_rows:
                 alert_df = pd.DataFrame(final_alert_rows)
+                
+                # Reorder columns: Put '警报组ID' and '警报原因' first
+                cols = alert_df.columns.tolist()
+                priority_cols = ['警报组ID', '警报原因']
+                other_cols = [c for c in cols if c not in priority_cols]
+                alert_df = alert_df[priority_cols + other_cols]
+                
+                # Add empty rows between groups for visual separation
+                # Convert to list of dicts to easily insert rows
+                # Sort by Group ID to ensure they are contiguous
+                alert_df.sort_values(by='警报组ID', inplace=True)
+                
+                output_rows = []
+                current_group = None
+                
+                for _, row in alert_df.iterrows():
+                    if current_group is not None and row['警报组ID'] != current_group:
+                        # Insert empty row (dict with all NaN/None)
+                        empty_row = {c: None for c in alert_df.columns}
+                        output_rows.append(empty_row)
+                    
+                    output_rows.append(row.to_dict())
+                    current_group = row['警报组ID']
+                
+                final_df = pd.DataFrame(output_rows)
                 output_csv_path = os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv')
-                alert_df.to_csv(output_csv_path, index=False, encoding='utf-8-sig')
+                final_df.to_csv(output_csv_path, index=False, encoding='utf-8-sig')
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv'), index=False)
 
             # 5. Swap Servers
-            logger.info("正在处理正常组的交换逻辑...")
+            logger.user("正在处理正常组的交换逻辑...")
             fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
             swapped_log_data = [] 
 
@@ -241,9 +274,9 @@ def index():
                 if r1_idx and r2_idx and r1_idx != r2_idx:
                     actual_swapped_count += 1
                     swapped_log_data.append({
-                        'Swap_Pair_ID_1': s1, 'Swap_Pair_ID_2': s2,
-                        'Original_Row_Index_1': r1_idx, 'Original_Row_Index_2': r2_idx,
-                        'Status': 'Swapped'
+                        '交换区服1': s1, '交换区服2': s2,
+                        '原始行号1': r1_idx, '原始行号2': r2_idx,
+                        '状态': '已交换'
                     })
                     
                     # Swap Logic
@@ -273,9 +306,9 @@ def index():
 
                     server_row_map[s1] = r2_idx
                     server_row_map[s2] = r1_idx
-                    logger.info(f"已交换 ({s1}, {s2}) - Rows: {r1_idx} <-> {r2_idx}")
+                    logger.dev(f"执行交换 ({s1}, {s2}) - Rows: {r1_idx} <-> {r2_idx}")
                 else:
-                    logger.warn(f"无法交换 ({s1}, {s2}): 在 XLSX 中未找到对应行")
+                    logger.dev(f"无法交换 ({s1}, {s2}): 未找到匹配行")
 
             if swapped_log_data:
                 swapped_df = pd.DataFrame(swapped_log_data)
@@ -286,7 +319,7 @@ def index():
 
             output_xlsx_path = os.path.join(app.config['DOWNLOAD_FOLDER'], 'result_plan.xlsx')
             wb.save(output_xlsx_path)
-            logger.success("所有任务处理完成！")
+            logger.user("所有任务处理完成！", 'SUCCESS')
 
             return render_template('index.html', 
                                    success=True, 
