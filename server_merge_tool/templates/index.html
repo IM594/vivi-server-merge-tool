@@ -138,7 +138,7 @@
         
         /* Tooltip for Stat Cards - Dynamic Preview */
         .preview-popover {
-            position: absolute; top: calc(100% + 10px); left: 0; right: 0;
+            position: absolute; top: calc(100% + 10px); left: 0;
             background: rgba(255, 255, 255, 0.98); 
             backdrop-filter: blur(10px);
             border: 1px solid rgba(0,0,0,0.05);
@@ -148,8 +148,14 @@
             opacity: 0; transform: translateY(-10px) scale(0.98); visibility: hidden;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             pointer-events: none;
-            max-height: 350px; overflow-y: auto;
+            max-height: 450px; overflow-y: auto;
+            min-width: 300px; /* Default min-width */
         }
+        /* Special width for swap popover because it has more content */
+        .stat-card.swap .preview-popover {
+            min-width: 500px;
+        }
+
         .stat-card:hover .preview-popover {
             opacity: 1; transform: translateY(0) scale(1); visibility: visible; pointer-events: auto;
         }
@@ -168,6 +174,18 @@
         .preview-item:last-child { border-bottom: none; }
         .preview-item .ids { font-weight: 600; color: var(--text-main); display: flex; justify-content: space-between; font-family: "Monaco", monospace; }
         .preview-item .reason { color: var(--text-sub); margin-top: 0.25rem; font-size: 0.75rem; }
+        
+        /* Swap Preview Styling */
+        .swap-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+        .swap-ids { font-weight: 700; color: var(--text-main); font-family: "Monaco", monospace; color: var(--accent-swap); }
+        .swap-rows { font-size: 0.7rem; color: var(--text-sub); background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+        
+        .swap-details { display: flex; flex-direction: column; gap: 0.4rem; background: #fffbeb; padding: 0.5rem; border-radius: 6px; border: 1px solid #fef3c7; }
+        .swap-line { display: grid; grid-template-columns: 40px 1fr 20px 1fr; align-items: center; gap: 0.5rem; font-size: 0.75rem; }
+        .badge-row { color: #b45309; font-weight: 600; font-size: 0.7rem; }
+        .val-before { color: #92400e; text-align: right; font-family: "Monaco", monospace; }
+        .val-after { color: #047857; font-weight: 600; font-family: "Monaco", monospace; }
+        .arrow { color: #94a3b8; text-align: center; font-size: 0.9rem; }
         
         /* Download Section */
         .download-section { display: flex; gap: 1rem; flex-wrap: wrap; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
@@ -357,13 +375,25 @@
                         <div class="preview-header">交换预览 (前10条)</div>
                         {% if swap_preview %}
                             {% for item in swap_preview %}
-                            <div class="preview-item">
-                                <div class="ids">
-                                    <span>{{ item['交换区服1'] }}</span>
-                                    <span>↔</span>
-                                    <span>{{ item['交换区服2'] }}</span>
+                            <div class="preview-item swap-item">
+                                <div class="swap-header">
+                                    <span class="swap-ids">{{ item['交换区服1'] }} ↔ {{ item['交换区服2'] }}</span>
+                                    <span class="swap-rows">Row {{ item['原始行号1'] }} / {{ item['原始行号2'] }}</span>
                                 </div>
-                                <div class="reason">Row {{ item['原始行号1'] }} ↔ Row {{ item['原始行号2'] }}</div>
+                                <div class="swap-details">
+                                    <div class="swap-line">
+                                        <span class="badge-row">R{{ item['原始行号1'] }}</span>
+                                        <span class="val-before">{{ item['Before1'] }}</span>
+                                        <span class="arrow">➝</span>
+                                        <span class="val-after">{{ item['After1'] }}</span>
+                                    </div>
+                                    <div class="swap-line">
+                                        <span class="badge-row">R{{ item['原始行号2'] }}</span>
+                                        <span class="val-before">{{ item['Before2'] }}</span>
+                                        <span class="arrow">➝</span>
+                                        <span class="val-after">{{ item['After2'] }}</span>
+                                    </div>
+                                </div>
                             </div>
                             {% endfor %}
                         {% else %}
