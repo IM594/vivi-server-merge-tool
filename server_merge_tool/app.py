@@ -332,7 +332,9 @@ def index():
                                    swapped_csv='swapped_log.csv',
                                    result_xlsx='result_plan.xlsx',
                                    alert_count=len(alert_groups),
-                                   swap_count=actual_swapped_count)
+                                   swap_count=actual_swapped_count,
+                                   alert_preview=alert_groups[:10], # Pass top 10 for preview
+                                   swap_preview=swapped_log_data[:10]) # Pass top 10 for preview
 
         except Exception as e:
             traceback.print_exc()
