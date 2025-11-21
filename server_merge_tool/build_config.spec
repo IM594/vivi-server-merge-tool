@@ -18,8 +18,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('templates', 'templates'),
-        ('uploads', 'uploads'),
-        ('downloads', 'downloads')
     ],
     hiddenimports=[
         'openpyxl.cell._writer',

@@ -27,6 +27,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install flask pandas openpyxl pyinstaller
         
+    - name: Create necessary directories
+      run: |
+        mkdir uploads
+        mkdir downloads
+        
     - name: Build with PyInstaller
       run: |
         pyinstaller build_config.spec
