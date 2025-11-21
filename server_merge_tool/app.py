@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import numpy as np
 import datetime
@@ -8,9 +9,18 @@ from openpyxl.styles import PatternFill
 import traceback
 
 app = Flask(__name__)
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-DOWNLOAD_FOLDER = os.path.join(BASE_DIR, 'downloads')
+
+# Determine if running as a script or frozen (PyInstaller)
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+    # When frozen, templates and static files are in sys._MEIPASS
+    app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'))
+else:
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+    app = Flask(__name__)
+
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads') # Use CWD for user-accessible folders
+DOWNLOAD_FOLDER = os.path.join(os.getcwd(), 'downloads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
