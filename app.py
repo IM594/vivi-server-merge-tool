@@ -493,9 +493,9 @@ def index():
                                    alert_count=len(alert_groups),
                                    secondary_alert_count=len(secondary_alert_groups),
                                    swap_count=actual_swapped_count,
-                                   alert_preview=alert_groups[:10], # Pass top 10 for preview
-                                   secondary_alert_preview=secondary_alert_groups[:10],
-                                   swap_preview=swapped_log_data[:10]) # Pass top 10 for preview
+                                   alert_preview=alert_groups, # Pass all for preview
+                                   secondary_alert_preview=secondary_alert_groups,
+                                   swap_preview=swapped_log_data) # Pass all for preview
 
         except Exception as e:
             traceback.print_exc()

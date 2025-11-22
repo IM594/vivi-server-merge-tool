@@ -169,6 +169,16 @@
         
         /* Expanded Mode (when logs are collapsed) */
         .main-content.expanded-mode { gap: 1rem; }
+        .main-content.expanded-mode .stat-hint { display: none; }
+        
+        /* Disable hover effects in expanded mode */
+        .main-content.expanded-mode .stat-card:hover { 
+            transform: none; 
+            box-shadow: var(--shadow-sm);
+            border-color: rgba(0,0,0,0.04);
+            z-index: auto;
+        }
+
         .main-content.expanded-mode .stats-grid { 
             flex: 1; 
             min-height: 0; /* Allow flex shrinking/scrolling */
@@ -549,7 +559,7 @@
                     <div class="stat-value">{{ alert_count }}</div>
                     <!-- Popover -->
                     <div class="preview-popover">
-                        <div class="preview-header">警报预览 (前10条)</div>
+                        <div class="preview-header">警报预览</div>
                         {% if alert_preview %}
                             {% for item in alert_preview %}
                             <div class="preview-item">
@@ -574,7 +584,7 @@
                     <div class="stat-value">{{ secondary_alert_count }}</div>
                     <!-- Popover -->
                     <div class="preview-popover">
-                        <div class="preview-header">二次警报预览 (前10条)</div>
+                        <div class="preview-header">二次警报预览</div>
                         {% if secondary_alert_preview %}
                             {% for item in secondary_alert_preview %}
                             <div class="preview-item">
@@ -599,7 +609,7 @@
                     <div class="stat-value">{{ swap_count }}</div>
                     <!-- Popover -->
                     <div class="preview-popover">
-                        <div class="preview-header">合并申请预览 (前10条)</div>
+                        <div class="preview-header">合并申请预览</div>
                         {% if swap_preview %}
                             {% for item in swap_preview %}
                             <div class="preview-item swap-item">
