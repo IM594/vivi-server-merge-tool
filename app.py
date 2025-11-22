@@ -341,8 +341,8 @@ def index():
                 
                 # Add empty rows between groups for visual separation
                 # Convert to list of dicts to easily insert rows
-                # Sort by Group ID to ensure they are contiguous
-                alert_df.sort_values(by='警报组ID', inplace=True)
+                # Sort by Group ID to ensure they are contiguous, and then by Real Rank
+                alert_df.sort_values(by=['警报组ID', '真实排名'], ascending=[True, True], inplace=True)
                 
                 output_rows = []
                 current_group = None
