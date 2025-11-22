@@ -32,28 +32,31 @@
     *   检查 `[S1, S2, P1, P2]` 中是否有 `DAU <= 5`。
     *   如果触发，将 P1/P2 的详情也追加到 `final_alert_rows`，标记原因 "二次查询DAU<=5"。
 
-### 3. 交换处理
+### 3. 合并申请处理 (Merge Requests)
 *   **准备**：
     *   加载 XLSX (`load_workbook`)。
     *   构建 `server_row_map` (ServerID -> RowIndex) 以加速查找。
-*   **循环交换**：
-    *   遍历 `normal_groups`。
+*   **循环处理**：
+    *   遍历 `normal_groups` (每组 `S1`, `S2`)。
     *   查找 `S1`, `S2` 对应的行 `r1_idx`, `r2_idx`。
     *   **校验**：确保两者都存在且不在同一行。
-    *   **记录**：写入 `swapped_log_data`。
-    *   **执行交换**：
-        *   读取 R1 的 Target/Part 值，读取 R2 的 Target/Part 值。
-        *   在内存中通过逻辑判断（`if v == s1 then s2`）进行互换。
-        *   **排序**：对新生成的配对 `[new_t, new_p]` 进行 `.sort()`，确保小号在前。
-        *   回写到单元格 (`c1_t.value`, etc.)。
-    *   **标色**：设置整行的 `fill` 为黄色。
-    *   **更新索引**：`server_row_map[s1] = r2_idx`, `server_row_map[s2] = r1_idx`。
+    *   **识别剩余搭档 (Leftovers)**：
+        *   从 `R1` 中找到 `S1` 的当前搭档 `P1`。
+        *   从 `R2` 中找到 `S2` 的当前搭档 `P2`。
+    *   **执行合并**：
+        *   **Row 1 更新**：写入 `[S1, S2]`（排序后）。这是用户请求的合并对。
+        *   **Row 2 更新**：写入 `[P1, P2]`（排序后）。这是剩余的自动组队。
+    *   **记录**：写入 `swapped_log_data`，记录“合并申请”以及变更前后的状态。
+    *   **标色**：设置整行 `R1` 和 `R2` 的 `fill` 为黄色。
+    *   **更新索引**：
+        *   `S1, S2` 的映射更新为 `R1`。
+        *   `P1, P2` 的映射更新为 `R2`。
 
 ### 4. 输出生成
 *   `alert_df.to_csv`: 生成警报文件。
-*   `swapped_df.to_csv`: 生成交换日志。
+*   `swapped_df.to_csv`: 生成合并日志文件（原名 `swapped_log` 保留，但内容变为合并记录）。
 *   `wb.save`: 保存修改后的 XLSX。
-*   `render_template`: 返回页面，传递统计数据 `alert_count` 和 `actual_swapped_count`。
+*   `render_template`: 返回页面，传递统计数据 `alert_count` 和 `swap_count` (现代表合并成功数)。
 
 ## 关键细节
 *   **CSV 合并**：正确处理了多文件。
