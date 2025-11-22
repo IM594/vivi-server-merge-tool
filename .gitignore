@@ -11,15 +11,13 @@ instance/
 .webassets-cache
 
 # Project specific
-server_merge_tool/uploads/
-server_merge_tool/downloads/
-server_merge_tool/build/
-server_merge_tool/dist/
+uploads/
+downloads/
+build/
+dist/
 *.spec
 *.DS_Store
 
-# Ignore other projects
-chat-usage-tracker/
 
 # IDE
 .idea/
