@@ -463,17 +463,152 @@
         .empty-text { font-size: 1rem; max-width: 400px; line-height: 1.6; color: var(--text-sub); }
 
         @media (max-width: 1024px) {
-            .app-container { grid-template-columns: 320px 1fr; }
-            .sidebar { padding: 1.5rem; }
+            .app-container { grid-template-columns: 300px 1fr; }
+            .sidebar { padding: 1.5rem; width: 300px; }
             .main-content { padding: 1.5rem; }
-            .stats-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+            
+            /* Force stack on tablet/mobile */
+            .stats-grid { grid-template-columns: 1fr; }
+            
+            /* Fix expanded mode layout on smaller screens:
+               Remove fixed height constraints so cards can expand freely 
+               and allow the main content to scroll.
+            */
+            .main-content.expanded-mode .stats-grid {
+                flex: none;
+                height: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+            
+            .main-content.expanded-mode .stat-card {
+                min-height: 350px; /* Ensure visible content */
+                height: auto;
+                flex: none;
+            }
+            
+            .stat-card.swap .preview-popover { width: 100%; } /* Fix swap popover width */
         }
 
         @media (max-width: 768px) {
-            .app-container { grid-template-columns: 1fr; height: auto; overflow: visible; }
-            .sidebar { border-right: none; border-bottom: 1px solid var(--border); height: auto; overflow: visible; }
-            .main-content { overflow: visible; height: auto; }
+            body { overflow: auto; height: auto; }
+            .app-container { grid-template-columns: 1fr; height: auto; overflow: visible; display: block; }
+            
+            /* Mobile Sidebar - Collapsible */
+            .sidebar { 
+                width: 100%; 
+                height: auto; 
+                border-right: none; 
+                border-bottom: 1px solid var(--border); 
+                position: relative;
+                z-index: 30;
+                transform: none;
+                opacity: 1;
+                transition: max-height 0.3s ease-out, padding 0.3s;
+                max-height: 1000px; /* Enough for content */
+                overflow: hidden;
+            }
+            
+            .app-container.sidebar-collapsed .sidebar {
+                max-height: 80px; /* Show only header */
+                padding-bottom: 0;
+                transform: none;
+                opacity: 1;
+                pointer-events: auto;
+            }
+            
+            .app-container.sidebar-collapsed .sidebar form {
+                display: none;
+            }
+            
+            /* Adjust header in collapsed mode */
+            .app-container.sidebar-collapsed .sidebar .header {
+                margin-bottom: 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                width: 100%;
+            }
+            
+            /* Mobile Toggle Button (Inside Sidebar) */
+            .mobile-toggle {
+                display: flex;
+                padding: 0.5rem;
+                background: transparent;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                color: var(--text-sub);
+                cursor: pointer;
+            }
+            
+            .main-content { 
+                padding: 1rem; 
+                height: auto; 
+                overflow: visible;
+            }
+            
+            /* Floating toggle hidden on mobile, use internal one */
             .sidebar-toggle { display: none; }
+            
+            /* Force Expanded Mode styles on Mobile */
+            .stat-card .stat-hint { display: none; }
+            .stat-card:hover { transform: none; box-shadow: var(--shadow-sm); z-index: auto; }
+            
+            .preview-popover {
+                position: relative;
+                top: auto; left: auto; right: auto;
+                width: 100% !important;
+                opacity: 1; visibility: visible; transform: none;
+                box-shadow: none; border: none; 
+                border-top: 1px solid var(--border);
+                border-radius: 0;
+                margin-top: 1rem;
+                background: transparent;
+                max-height: none;
+                pointer-events: auto;
+            }
+            
+            .preview-header { position: static; background: transparent; padding-left: 0; }
+            .preview-item { padding-left: 0; padding-right: 0; }
+            
+            /* Swap Details Responsive */
+            .swap-columns-head, .swap-line {
+                grid-template-columns: 70px 1fr 20px 1fr; /* Tighter columns */
+                gap: 0.25rem;
+                font-size: 0.75rem;
+                padding: 0.5rem;
+            }
+            .swap-value { font-size: 0.75rem; word-break: break-all; }
+            
+            /* Download buttons stack */
+            .download-section { flex-direction: column; align-items: flex-start; gap: 1rem; }
+            .download-actions { width: 100%; }
+            .btn-download { flex: 1; text-align: center; }
+            
+            /* Log Panel */
+            .log-panel { min-height: auto; }
+        }
+
+        /* Extra small screens */
+        @media (max-width: 480px) {
+            .swap-columns-head, .swap-line {
+                display: flex;
+                flex-wrap: wrap;
+            }
+            .swap-columns-head { display: none; } /* Hide headers on tiny screens */
+            .swap-line {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.25rem;
+                padding: 0.75rem;
+                border-bottom: 1px solid var(--border);
+            }
+            .swap-line span { width: 100%; text-align: left !important; }
+            .swap-line .arrow { display: none; }
+            .swap-value.after::before { content: "➝ "; color: #cbd5e1; }
+            
+            .stat-value { font-size: 1.5rem; }
         }
         
         /* Sidebar Toggle Button */
@@ -501,6 +636,8 @@
             border-color: var(--primary);
             transform: scale(1.1);
         }
+        
+        .mobile-toggle { display: none; }
     </style>
 </head>
 <body>
@@ -513,8 +650,13 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="header">
-                <h1>合服分析工具</h1>
-                <p>Server Merge Analyzer v2.1</p>
+                <div>
+                    <h1>合服分析工具</h1>
+                    <p>Server Merge Analyzer v2.1</p>
+                </div>
+                <button class="mobile-toggle" onclick="toggleSidebar()">
+                    <svg id="mobileToggleIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
             </div>
 
             <form action="/" method="post" enctype="multipart/form-data" id="analysisForm">
@@ -733,25 +875,47 @@
         }
 
         function toggleSidebar() {
-            document.querySelector('.app-container').classList.toggle('sidebar-collapsed');
+            const container = document.querySelector('.app-container');
+            container.classList.toggle('sidebar-collapsed');
+            
+            // Update mobile toggle icon
+            if (window.innerWidth <= 768) {
+                const icon = document.getElementById('mobileToggleIcon');
+                if (icon) {
+                    if (container.classList.contains('sidebar-collapsed')) {
+                        // Collapsed state: Show 'Expand' (Down)
+                        icon.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+                    } else {
+                        // Expanded state: Show 'Collapse' (Up)
+                        icon.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                    }
+                }
+            }
         }
 
         // Initialize logs state
         window.addEventListener('load', function() {
+            const container = document.querySelector('.app-container');
+            
+            // Mobile init: Always collapse sidebar initially on mobile
+            if (window.innerWidth <= 768) {
+                 container.classList.add('sidebar-collapsed');
+                 const icon = document.getElementById('mobileToggleIcon');
+                 if(icon) icon.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            }
+
             if (document.getElementById('logContainer')) {
                 toggleLogs();
                 // Default state: Logs collapsed, Stats expanded
-                // Ensure UI matches the HTML static state (collapsed)
                 const mainContent = document.querySelector('.main-content');
                 if (mainContent) {
                     mainContent.classList.add('expanded-mode');
                 }
                 
-                // Auto-collapse sidebar on analysis success to show more content
-                // But only if not on mobile
+                // Auto-collapse sidebar on analysis success to show more content on desktop
                 if (window.innerWidth > 768) {
                     setTimeout(() => {
-                        document.querySelector('.app-container').classList.add('sidebar-collapsed');
+                        container.classList.add('sidebar-collapsed');
                     }, 500);
                 }
             }
