@@ -362,8 +362,8 @@ def index():
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv'), index=False)
 
-            # 5. Swap Servers
-            logger.user("正在处理正常组的交换逻辑...")
+            # 5. Merge Servers (Merge Requests)
+            logger.user("正在处理正常组的合并申请...")
             fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
             swapped_log_data = [] 
 
@@ -383,7 +383,7 @@ def index():
                 if r1_idx and r2_idx and r1_idx != r2_idx:
                     actual_swapped_count += 1
                     
-                    # Capture State Before Swap
+                    # Capture State Before Merge
                     c1_t = ws.cell(row=r1_idx, column=target_col_idx+1)
                     c1_p = ws.cell(row=r1_idx, column=part_col_idx+1)
                     v1_t, v1_p = c1_t.value, c1_p.value
@@ -399,57 +399,79 @@ def index():
                     before_str_1 = fmt_pair(v1_t, v1_p)
                     before_str_2 = fmt_pair(v2_t, v2_p)
 
-                    # Swap Logic
-                    new_v1_t = s2 if v1_t == s1 else v1_t
-                    new_v1_p = s2 if v1_p == s1 else v1_p
-                    new_v2_t = s1 if v2_t == s2 else v2_t
-                    new_v2_p = s1 if v2_p == s2 else v2_p
+                    # --- MERGE LOGIC ---
+                    # Goal: Put s1 and s2 into Row 1. Put their leftovers (partners) into Row 2.
                     
-                    pair1 = sorted([x for x in [new_v1_t, new_v1_p] if x is not None])
-                    if len(pair1) == 2:
-                        c1_t.value, c1_p.value = pair1[0], pair1[1]
-                        final_v1_t, final_v1_p = pair1[0], pair1[1]
-                    else:
-                        # Fallback if something is weird, though logic above tries to keep structure
-                        c1_t.value, c1_p.value = new_v1_t, new_v1_p
-                        final_v1_t, final_v1_p = new_v1_t, new_v1_p
+                    # 1. Identify partners (leftovers)
+                    # If v1_t is s1, then v1_p is the partner. And vice versa.
+                    p1 = v1_p if v1_t == s1 else v1_t
+                    p2 = v2_p if v2_t == s2 else v2_t
                     
-                    pair2 = sorted([x for x in [new_v2_t, new_v2_p] if x is not None])
-                    if len(pair2) == 2:
-                        c2_t.value, c2_p.value = pair2[0], pair2[1]
-                        final_v2_t, final_v2_p = pair2[0], pair2[1]
+                    # 2. Assign new pairs
+                    # Row 1 gets s1 and s2 (The requested pair)
+                    # Row 2 gets p1 and p2 (The leftover pair)
+                    
+                    # Sort pairs (Small ID first)
+                    new_pair_1 = sorted([x for x in [s1, s2] if x is not None])
+                    new_pair_2 = sorted([x for x in [p1, p2] if x is not None])
+                    
+                    # 3. Update Cells
+                    # Row 1
+                    if len(new_pair_1) == 2:
+                        c1_t.value, c1_p.value = new_pair_1[0], new_pair_1[1]
+                        final_v1_t, final_v1_p = new_pair_1[0], new_pair_1[1]
+                    elif len(new_pair_1) == 1:
+                         c1_t.value, c1_p.value = new_pair_1[0], None
+                         final_v1_t, final_v1_p = new_pair_1[0], None
                     else:
-                         c2_t.value, c2_p.value = new_v2_t, new_v2_p
-                         final_v2_t, final_v2_p = new_v2_t, new_v2_p
-                        
+                         c1_t.value, c1_p.value = None, None # Should not happen for s1, s2
+                         final_v1_t, final_v1_p = None, None
+
+                    # Row 2
+                    if len(new_pair_2) == 2:
+                        c2_t.value, c2_p.value = new_pair_2[0], new_pair_2[1]
+                        final_v2_t, final_v2_p = new_pair_2[0], new_pair_2[1]
+                    elif len(new_pair_2) == 1:
+                         c2_t.value, c2_p.value = new_pair_2[0], None
+                         final_v2_t, final_v2_p = new_pair_2[0], None
+                    else:
+                         c2_t.value, c2_p.value = None, None
+                         final_v2_t, final_v2_p = None, None
+
                     # Capture State After Swap
                     after_str_1 = fmt_pair(final_v1_t, final_v1_p)
                     after_str_2 = fmt_pair(final_v2_t, final_v2_p)
                     
                     # Human readable change log
                     change_log = (
-                        f"组1 (行{r1_idx}): {before_str_1} ➔ {after_str_1}\n"
-                        f"   组2 (行{r2_idx}): {before_str_2} ➔ {after_str_2}"
+                        f"组1 (行{r1_idx}): {before_str_1} ➔ {after_str_1} (合并目标)\n"
+                        f"   组2 (行{r2_idx}): {before_str_2} ➔ {after_str_2} (剩余自动组队)"
                     )
                     
-                    logger.user(f"✅ 成功交换 {s1} ↔ {s2}\n   {change_log}", 'SUCCESS')
+                    logger.user(f"✅ 成功合并 {s1} + {s2}\n   {change_log}", 'SUCCESS')
                     
                     swapped_log_data.append({
-                        '交换区服1': s1, '交换区服2': s2,
+                        '合并申请': f"{s1}+{s2}",
                         '原始行号1': r1_idx, '原始行号2': r2_idx,
                         'Before1': before_str_1, 'After1': after_str_1,
                         'Before2': before_str_2, 'After2': after_str_2,
-                        '状态': '已交换'
+                        '状态': '已合并'
                     })
                         
                     for cell in ws[r1_idx]: cell.fill = fill
                     for cell in ws[r2_idx]: cell.fill = fill
 
-                    server_row_map[s1] = r2_idx
-                    server_row_map[s2] = r1_idx
-                    logger.dev(f"执行交换 ({s1}, {s2}) - Rows: {r1_idx} <-> {r2_idx}")
+                    # Update Map
+                    # Row 1 now contains s1 and s2
+                    if s1: server_row_map[s1] = r1_idx
+                    if s2: server_row_map[s2] = r1_idx
+                    # Row 2 now contains p1 and p2
+                    if p1: server_row_map[p1] = r2_idx
+                    if p2: server_row_map[p2] = r2_idx
+                    
+                    logger.dev(f"执行合并 ({s1}, {s2}) -> Row {r1_idx}, Leftovers ({p1}, {p2}) -> Row {r2_idx}")
                 else:
-                    logger.dev(f"无法交换 ({s1}, {s2}): 未找到匹配行")
+                    logger.dev(f"无法合并 ({s1}, {s2}): 未找到匹配行或已在同一行")
 
             if swapped_log_data:
                 swapped_df = pd.DataFrame(swapped_log_data)
