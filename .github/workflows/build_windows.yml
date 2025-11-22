@@ -10,9 +10,6 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: ./server_merge_tool
     
     steps:
     - uses: actions/checkout@v3
@@ -40,4 +37,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ServerMergeTool-Windows
-        path: server_merge_tool/dist/ServerMergeTool.exe
+        path: dist/ServerMergeTool.exe
