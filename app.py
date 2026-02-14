@@ -181,13 +181,13 @@ def index():
                           
                 power1 = row1['前2名战力之和']
                 power2 = row2['前2名战力之和']
-                cond_c = abs(power1 - power2) <= 1000000000
+                cond_c = abs(power1 - power2) <= 500000000
                 
                 if cond_a or cond_b or cond_c:
                     reasons = []
                     if cond_a: reasons.append(f"排名接近(差{abs(rank1-rank2)})")
                     if cond_b: reasons.append("高战高充(前25%)")
-                    if cond_c: reasons.append("战力接近(差<=10亿)")
+                    if cond_c: reasons.append("战力接近(差<=5亿)")
                     reason_str = "; ".join(reasons)
                     
                     logger.user(f"发现警报：{s1} 和 {s2} - {reason_str}", 'WARN')
