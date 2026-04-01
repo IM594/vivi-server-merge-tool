@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import pandas as pd
 import numpy as np
@@ -7,6 +8,7 @@ from flask import Flask, render_template, request, send_file, send_from_director
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 import traceback
+from collections import Counter, defaultdict
 
 app = Flask(__name__)
 
@@ -26,6 +28,8 @@ os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['DOWNLOAD_FOLDER'] = DOWNLOAD_FOLDER
+
+ID_LIKE_COLUMNS = ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']
 
 class ExecutionLogger:
     def __init__(self):
@@ -74,11 +78,375 @@ def parse_server_pairs(text):
                 continue
     return pairs, duplicates
 
-def get_server_info(df, server_id):
-    row = df[df['区服ID'] == server_id]
+def parse_server_ids_from_cell(value):
+    if value is None:
+        return []
+    if isinstance(value, (np.integer, int)):
+        return [int(value)]
+    if isinstance(value, float):
+        if np.isnan(value):
+            return []
+        return [int(value)]
+
+    text = str(value).strip()
+    if not text:
+        return []
+
+    return [int(match) for match in re.findall(r'\d+', text)]
+
+def build_server_info_map(df):
+    if '区服ID' not in df.columns:
+        return {}
+
+    deduped_df = df.drop_duplicates(subset=['区服ID'], keep='first')
+    return {int(row['区服ID']): row for _, row in deduped_df.iterrows()}
+
+def get_server_info(server_info_source, server_id):
+    if isinstance(server_info_source, dict):
+        return server_info_source.get(server_id)
+
+    row = server_info_source[server_info_source['区服ID'] == server_id]
     if row.empty:
         return None
     return row.iloc[0]
+
+def build_plan_rows(ws, target_col_idx, part_col_idx):
+    plan_rows = []
+
+    for r_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        target_ids = parse_server_ids_from_cell(row[target_col_idx])
+        participant_ids = parse_server_ids_from_cell(row[part_col_idx])
+
+        if not target_ids and not participant_ids:
+            continue
+
+        target = target_ids[0] if target_ids else None
+        members = []
+
+        if target is not None:
+            members.append(target)
+
+        for server_id in target_ids[1:] + participant_ids:
+            if server_id not in members:
+                members.append(server_id)
+
+        if not members:
+            continue
+
+        if target is None:
+            target = members[0]
+
+        plan_rows.append({
+            'row_idx': r_idx,
+            'target': target,
+            'participants': [member for member in members if member != target],
+            'members': members
+        })
+
+    return plan_rows
+
+def _pick_group_target(component_rows, members):
+    ordered_rows = sorted(component_rows, key=lambda item: item['row_idx'])
+    ordered_targets = [row['target'] for row in ordered_rows if row['target'] in members and row['target'] is not None]
+
+    if not ordered_targets:
+        return min(members)
+
+    counts = Counter(ordered_targets)
+    for target in ordered_targets:
+        if counts[target] == max(counts.values()):
+            return target
+
+    return min(members)
+
+def build_plan_groups(plan_rows):
+    if not plan_rows:
+        return []
+
+    normalized_rows = []
+    for row in plan_rows:
+        normalized_row = dict(row)
+        if 'members' not in normalized_row:
+            target = normalized_row.get('target')
+            participants = list(normalized_row.get('participants', []))
+            members = []
+            if target is not None:
+                members.append(target)
+            for server_id in participants:
+                if server_id not in members:
+                    members.append(server_id)
+            normalized_row['members'] = members
+        normalized_rows.append(normalized_row)
+
+    row_lookup = {index: row for index, row in enumerate(normalized_rows)}
+    server_to_row_indexes = defaultdict(set)
+
+    for index, row in row_lookup.items():
+        for server_id in row['members']:
+            server_to_row_indexes[server_id].add(index)
+
+    groups = []
+    visited = set()
+
+    for start_index in row_lookup:
+        if start_index in visited:
+            continue
+
+        pending = [start_index]
+        component_rows = []
+        component_members = set()
+
+        while pending:
+            current_index = pending.pop()
+            if current_index in visited:
+                continue
+
+            visited.add(current_index)
+            current_row = row_lookup[current_index]
+            component_rows.append(current_row)
+            component_members.update(current_row['members'])
+
+            for server_id in current_row['members']:
+                pending.extend(server_to_row_indexes[server_id] - visited)
+
+        row_indices = sorted(row['row_idx'] for row in component_rows)
+        groups.append({
+            'target': _pick_group_target(component_rows, component_members),
+            'members': sorted(component_members),
+            'row_indices': row_indices,
+            'anchor_row': row_indices[0]
+        })
+
+    groups.sort(key=lambda item: item['anchor_row'])
+    return groups
+
+def _clone_group(group):
+    return {
+        'target': group['target'],
+        'members': list(group['members']),
+        'row_indices': list(group['row_indices']),
+        'anchor_row': group['anchor_row']
+    }
+
+def format_group_label(group):
+    if not group or not group.get('members'):
+        return "空"
+
+    target = group['target']
+    participants = [member for member in group['members'] if member != target]
+
+    if participants:
+        return f"{target} -> {','.join(str(item) for item in participants)}"
+    return str(target)
+
+def regroup_for_requested_pair(groups, s1, s2):
+    working_groups = [_clone_group(group) for group in groups]
+    group_indexes = [index for index, group in enumerate(working_groups) if s1 in group['members'] or s2 in group['members']]
+    group_indexes = sorted(set(group_indexes))
+
+    group_a_index = next((index for index, group in enumerate(working_groups) if s1 in group['members']), None)
+    group_b_index = next((index for index, group in enumerate(working_groups) if s2 in group['members']), None)
+
+    if group_a_index is None or group_b_index is None:
+        return working_groups, {
+            'status': 'missing',
+            'missing_ids': [server_id for server_id, index in [(s1, group_a_index), (s2, group_b_index)] if index is None]
+        }
+
+    affected_indexes = sorted(set([group_a_index, group_b_index]))
+    source_groups = [_clone_group(working_groups[index]) for index in affected_indexes]
+    source_rows = sorted({row for group in source_groups for row in group['row_indices']})
+    involved_members = sorted({member for group in source_groups for member in group['members']})
+    requested_members = sorted({s1, s2})
+    leftover_members = [member for member in involved_members if member not in requested_members]
+
+    anchor_rows = source_rows or [group['anchor_row'] for group in source_groups]
+    requested_anchor = anchor_rows[0]
+
+    requested_group = {
+        'target': min(requested_members),
+        'members': requested_members,
+        'row_indices': [requested_anchor],
+        'anchor_row': requested_anchor
+    }
+
+    leftover_group = None
+    if leftover_members:
+        leftover_anchor = anchor_rows[1] if len(anchor_rows) > 1 else requested_anchor
+        leftover_group = {
+            'target': min(leftover_members),
+            'members': leftover_members,
+            'row_indices': [leftover_anchor],
+            'anchor_row': leftover_anchor
+        }
+
+    new_groups = []
+    replaced = False
+
+    for index, group in enumerate(working_groups):
+        if index in affected_indexes:
+            if not replaced:
+                new_groups.append(requested_group)
+                if leftover_group:
+                    new_groups.append(leftover_group)
+                replaced = True
+            continue
+        new_groups.append(group)
+
+    new_groups.sort(key=lambda item: item['anchor_row'])
+
+    return new_groups, {
+        'status': 'ok',
+        'source_groups': source_groups,
+        'source_rows': source_rows,
+        'requested_group': requested_group,
+        'leftover_group': leftover_group
+    }
+
+def evaluate_primary_warning(server_info_source, s1, s2, total_servers):
+    row1 = get_server_info(server_info_source, s1)
+    row2 = get_server_info(server_info_source, s2)
+    missing_ids = []
+
+    if row1 is None:
+        missing_ids.append(s1)
+    if row2 is None:
+        missing_ids.append(s2)
+
+    if row1 is None or row2 is None:
+        return {
+            'triggered': False,
+            'reasons': [],
+            'missing_ids': missing_ids
+        }
+
+    rank1 = row1['真实排名']
+    rank2 = row2['真实排名']
+
+    cond_rank_close = abs(rank1 - rank2) <= 5
+    top_25_threshold = total_servers * 0.25
+    cond_high_value = (
+        rank1 <= top_25_threshold and rank2 <= top_25_threshold and
+        row1['最高玩家累充金额'] >= 5000 and row2['最高玩家累充金额'] >= 5000
+    )
+    cond_power_close = abs(row1['前2名战力之和'] - row2['前2名战力之和']) <= 500000000
+
+    reasons = []
+    if cond_rank_close:
+        reasons.append(f"排名接近(差{abs(rank1-rank2)})")
+    if cond_high_value:
+        reasons.append("高战高充(前25%)")
+    if cond_power_close:
+        reasons.append("战力接近(差<=5亿)")
+
+    return {
+        'triggered': bool(reasons),
+        'reasons': reasons,
+        'missing_ids': []
+    }
+
+def evaluate_secondary_dau_warning(server_info_source, leftover_members, primary_triggered):
+    if not primary_triggered or not leftover_members:
+        return {
+            'triggered': False,
+            'low_dau_ids': [],
+            'reason': ''
+        }
+
+    low_dau_items = []
+
+    for server_id in sorted(set(leftover_members)):
+        row = get_server_info(server_info_source, server_id)
+        if row is None:
+            continue
+
+        dau = int(row['DAU'])
+        if dau < 5:
+            low_dau_items.append((server_id, dau))
+
+    if not low_dau_items:
+        return {
+            'triggered': False,
+            'low_dau_ids': [],
+            'reason': ''
+        }
+
+    reason = "剩余组存在低 DAU 区服: " + "; ".join(f"{server_id} DAU<5({dau})" for server_id, dau in low_dau_items)
+    return {
+        'triggered': True,
+        'low_dau_ids': [server_id for server_id, _ in low_dau_items],
+        'reason': reason
+    }
+
+def build_alert_row(row, group_id, reason, alert_type):
+    row_dict = row.to_dict()
+    row_dict['警报组ID'] = group_id
+    row_dict['警报原因'] = reason
+    row_dict['警报类型'] = alert_type
+
+    for column in ID_LIKE_COLUMNS:
+        if column not in row_dict:
+            continue
+        try:
+            if isinstance(row_dict[column], (float, int, np.integer)):
+                row_dict[column] = int(row_dict[column])
+        except Exception:
+            pass
+
+    return row_dict
+
+def build_output_rows_from_groups(groups):
+    output_rows = []
+
+    for group in groups:
+        participants = [member for member in group['members'] if member != group['target']]
+        output_rows.append({
+            '目标服': group['target'],
+            '参与服': ",".join(str(member) for member in participants),
+            'anchor_row': group['anchor_row']
+        })
+
+    return output_rows
+
+def merge_output_rows_by_target(rows):
+    merged = {}
+    order = []
+
+    for row in rows:
+        target = row.get('目标服')
+        if target is None:
+            continue
+
+        if target not in merged:
+            merged[target] = {
+                '目标服': target,
+                '参与服_set': set(),
+                'anchor_row': row.get('anchor_row')
+            }
+            order.append(target)
+
+        merged[target]['参与服_set'].update(parse_server_ids_from_cell(row.get('参与服')))
+
+        anchor_row = row.get('anchor_row')
+        if anchor_row is not None:
+            current_anchor = merged[target]['anchor_row']
+            merged[target]['anchor_row'] = anchor_row if current_anchor is None else min(current_anchor, anchor_row)
+
+    merged_rows = []
+
+    for target in order:
+        merged_row = merged[target]
+        participants = sorted(server_id for server_id in merged_row['参与服_set'] if server_id != target)
+        output = {
+            '目标服': target,
+            '参与服': ",".join(str(server_id) for server_id in participants)
+        }
+        if merged_row['anchor_row'] is not None:
+            output['anchor_row'] = merged_row['anchor_row']
+        merged_rows.append(output)
+
+    merged_rows.sort(key=lambda item: item.get('anchor_row', float('inf')))
+    return merged_rows
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -139,6 +507,7 @@ def index():
             df = df.sort_values(by='前2名战力之和', ascending=False).reset_index(drop=True)
             df['真实排名'] = df.index + 1
             total_servers = len(df)
+            server_info_map = build_server_info_map(df)
             
             input_pairs, duplicates = parse_server_pairs(pairs_text)
             
@@ -151,54 +520,8 @@ def index():
                     logger.dev(f"重复列表 (前5个): {', '.join(duplicates[:5])}...", 'WARN')
             
             logger.user(f"解析输入：共 {len(input_pairs)} 组有效检测区服")
-            
-            alert_groups = [] 
-            normal_groups = [] 
-            
-            # 3. Primary Alert Check
-            logger.dev("开始执行初级警报检测 (Primary Check)")
-            for s1, s2 in input_pairs:
-                row1 = get_server_info(df, s1)
-                row2 = get_server_info(df, s2)
-                
-                if row1 is None:
-                    logger.user(f"警告：区服 {s1} 数据缺失，已跳过", 'WARN')
-                if row2 is None:
-                    logger.user(f"警告：区服 {s2} 数据缺失，已跳过", 'WARN')
 
-                if row1 is None or row2 is None:
-                    continue
-                    
-                rank1 = row1['真实排名']
-                rank2 = row2['真实排名']
-                
-                # Conditions
-                cond_a = abs(rank1 - rank2) <= 5
-                
-                top_25_threshold = total_servers * 0.25
-                cond_b = (rank1 <= top_25_threshold and rank2 <= top_25_threshold and
-                          row1['最高玩家累充金额'] >= 5000 and row2['最高玩家累充金额'] >= 5000)
-                          
-                power1 = row1['前2名战力之和']
-                power2 = row2['前2名战力之和']
-                cond_c = abs(power1 - power2) <= 500000000
-                
-                if cond_a or cond_b or cond_c:
-                    reasons = []
-                    if cond_a: reasons.append(f"排名接近(差{abs(rank1-rank2)})")
-                    if cond_b: reasons.append("高战高充(前25%)")
-                    if cond_c: reasons.append("战力接近(差<=5亿)")
-                    reason_str = "; ".join(reasons)
-                    
-                    logger.user(f"发现警报：{s1} 和 {s2} - {reason_str}", 'WARN')
-                    alert_groups.append({'ids': [s1, s2], 'reason': reason_str})
-                else:
-                    normal_groups.append((s1, s2))
-            
-            logger.user(f"检测完成：发现 {len(alert_groups)} 组警报，{len(normal_groups)} 组正常")
-
-            # 4. Secondary Alert Check
-            logger.dev("加载 XLSX 进行二次关联检测")
+            logger.dev("加载 XLSX 并解析现有逻辑组合")
             wb = load_workbook(xlsx_path)
             ws = wb.active
             
@@ -210,112 +533,94 @@ def index():
                 target_col_idx = 0
                 part_col_idx = 1
 
-            def find_partner_in_xlsx(server_id):
-                for r_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                    t_id = row[target_col_idx]
-                    p_id = row[part_col_idx]
-                    if t_id == server_id: return r_idx, p_id
-                    if p_id == server_id: return r_idx, t_id
-                return None, None
+            plan_groups = build_plan_groups(build_plan_rows(ws, target_col_idx, part_col_idx))
+            logger.user(f"识别到 {len(plan_groups)} 个现有逻辑组合")
 
-            final_alert_rows = [] 
+            alert_groups = []
             secondary_alert_groups = []
-            
-            for group in alert_groups:
-                group_id = f"Group_{group['ids'][0]}_{group['ids'][1]}"
-                for sid in group['ids']:
-                    r = get_server_info(df, sid)
-                    if r is not None:
-                        r_dict = r.to_dict()
-                        r_dict['警报组ID'] = group_id
-                        r_dict['警报原因'] = group['reason']
-                        
-                        # Force int type for ID fields in dict if they became float
-                        for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
-                            if k in r_dict:
-                                try:
-                                    if isinstance(r_dict[k], float):
-                                        r_dict[k] = int(r_dict[k])
-                                    elif isinstance(r_dict[k], (int, float)): # Ensure even numpy ints are python ints
-                                         r_dict[k] = int(r_dict[k])
-                                except:
-                                    pass
+            final_alert_rows = []
+            swapped_log_data = []
+            changed_anchor_rows = set()
+            fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 
-                        final_alert_rows.append(r_dict)
-                        
-                s1, s2 = group['ids'][0], group['ids'][1]
-                partners = []
-                _, p1 = find_partner_in_xlsx(s1)
-                if p1: partners.append(p1)
-                _, p2 = find_partner_in_xlsx(s2)
-                if p2: partners.append(p2)
-                
-                # Independent Secondary Checks
-                # Logic: For each server in the alerted pair (S1, S2), check their respective partners.
-                # If a Low DAU situation is found (either the server itself or its partner),
-                # create a NEW, INDEPENDENT alert group for that pair (Server + Partner).
-                
-                # Helper to process secondary pair
-                def process_secondary_pair(main_id, partner_id):
-                    if not partner_id:
-                        return
+            logger.dev("开始执行重组与双阶段预警")
+            for s1, s2 in input_pairs:
+                primary_warning = evaluate_primary_warning(server_info_map, s1, s2, total_servers)
+                if primary_warning['missing_ids']:
+                    for missing_id in primary_warning['missing_ids']:
+                        logger.user(f"警告：区服 {missing_id} 缺少数值数据，本次仅执行重组，不参与预警判定", 'WARN')
 
-                    main_row = get_server_info(df, main_id)
-                    partner_row = get_server_info(df, partner_id)
-                    
-                    # Check DAU conditions
-                    alerts = []
-                    if main_row is not None and main_row['DAU'] <= 5:
-                        alerts.append(f"{main_id}本身DAU过低({int(main_row['DAU'])})")
-                    if partner_row is not None and partner_row['DAU'] <= 5:
-                        alerts.append(f"关联服{partner_id}DAU过低({int(partner_row['DAU'])})")
-                        
-                    if alerts:
-                        # Create a unique group for this secondary relationship
-                        # Sort IDs to ensure consistent Group ID (e.g. Group_Small_Big)
-                        pair_ids = sorted([main_id, partner_id])
-                        sec_group_id = f"Group_{pair_ids[0]}_{pair_ids[1]}"
-                        reason_str = " | ".join(alerts)
-                        
-                        # Log it
-                        logger.user(f"触发独立二次警报: {sec_group_id} - {reason_str}", 'WARN')
-                        
-                        # Add to summary list for frontend
-                        secondary_alert_groups.append({
-                            'ids': pair_ids,
-                            'reason': reason_str
-                        })
-                        
-                        # Add rows to CSV data
-                        # 1. Add Main Server Row
-                        if main_row is not None:
-                            r_dict = main_row.to_dict()
-                            r_dict['警报组ID'] = sec_group_id
-                            r_dict['警报原因'] = reason_str
-                            # Force int type for ID fields in dict if they became float
-                            for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
-                                if k in r_dict and isinstance(r_dict[k], float):
-                                    r_dict[k] = int(r_dict[k])
-                            final_alert_rows.append(r_dict)
-                            
-                        # 2. Add Partner Row
-                        if partner_row is not None:
-                            pr_dict = partner_row.to_dict()
-                            pr_dict['警报组ID'] = sec_group_id
-                            pr_dict['警报原因'] = reason_str
-                            # Force int type for ID fields in dict if they became float
-                            for k in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']:
-                                if k in pr_dict and isinstance(pr_dict[k], float):
-                                    pr_dict[k] = int(pr_dict[k])
-                            final_alert_rows.append(pr_dict)
+                plan_groups, regroup_result = regroup_for_requested_pair(plan_groups, s1, s2)
+                if regroup_result['status'] != 'ok':
+                    logger.user(f"警告：区服对 {s1}, {s2} 未能在计划表中找到完整来源组合，已跳过重组", 'WARN')
+                    continue
 
-                # Check S1 and its partner
-                _, p1 = find_partner_in_xlsx(s1)
-                process_secondary_pair(s1, p1)
+                requested_group = regroup_result['requested_group']
+                leftover_group = regroup_result['leftover_group']
+                changed_anchor_rows.update(group['anchor_row'] for group in [requested_group, leftover_group] if group)
 
-                # Check S2 and its partner
-                _, p2 = find_partner_in_xlsx(s2)
-                process_secondary_pair(s2, p2)
+                reason_text = "；".join(primary_warning['reasons']) if primary_warning['reasons'] else "未触发常规预警"
+                logger.user(
+                    f"已重组 {s1} + {s2}：请求组 {format_group_label(requested_group)}；"
+                    f"剩余组 {format_group_label(leftover_group)}；常规预警：{reason_text}"
+                )
+
+                if primary_warning['triggered']:
+                    primary_reason = "; ".join(primary_warning['reasons'])
+                    alert_groups.append({'ids': [s1, s2], 'reason': primary_reason})
+                    logger.user(f"发现常规预警：{s1} 和 {s2} - {primary_reason}", 'WARN')
+
+                    for server_id in [s1, s2]:
+                        row = get_server_info(server_info_map, server_id)
+                        if row is not None:
+                            final_alert_rows.append(
+                                build_alert_row(row, f"Primary_{min(s1, s2)}_{max(s1, s2)}", primary_reason, '常规预警')
+                            )
+
+                secondary_warning = evaluate_secondary_dau_warning(
+                    server_info_map,
+                    leftover_group['members'] if leftover_group else [],
+                    primary_warning['triggered']
+                )
+                if secondary_warning['triggered'] and leftover_group:
+                    secondary_alert_groups.append({
+                        'ids': list(leftover_group['members']),
+                        'reason': secondary_warning['reason']
+                    })
+                    logger.user(
+                        f"触发二次 DAU 预警：剩余组 {format_group_label(leftover_group)} - {secondary_warning['reason']}",
+                        'WARN'
+                    )
+
+                    for server_id in leftover_group['members']:
+                        row = get_server_info(server_info_map, server_id)
+                        if row is not None:
+                            final_alert_rows.append(
+                                build_alert_row(
+                                    row,
+                                    f"Secondary_{min(s1, s2)}_{max(s1, s2)}",
+                                    secondary_warning['reason'],
+                                    '二次DAU预警'
+                                )
+                            )
+
+                source_groups = regroup_result['source_groups']
+                swapped_log_data.append({
+                    '合并申请': f"{s1}+{s2}",
+                    '原始行号1': ",".join(str(row) for row in source_groups[0]['row_indices']) if source_groups else '-',
+                    '原始行号2': ",".join(str(row) for row in source_groups[1]['row_indices']) if len(source_groups) > 1 else '-',
+                    'Before1': format_group_label(source_groups[0]) if source_groups else '空',
+                    'After1': format_group_label(requested_group),
+                    'Before2': format_group_label(source_groups[1]) if len(source_groups) > 1 else '同组拆分',
+                    'After2': format_group_label(leftover_group),
+                    '状态': '已重组'
+                })
+
+            logger.user(
+                f"处理完成：发现 {len(alert_groups)} 组常规预警，"
+                f"{len(secondary_alert_groups)} 组二次 DAU 预警，"
+                f"成功重组 {len(swapped_log_data)} 组"
+            )
 
             # Create Alert CSV with optimized formatting
             if final_alert_rows:
@@ -330,7 +635,7 @@ def index():
                     '前十平均战力', '前十平均等级', '最高玩家累充金额'
                 ]
                 # Added cols by logic
-                added_cols_to_keep = ['真实排名', '警报组ID', '警报原因']
+                added_cols_to_keep = ['真实排名', '警报类型', '警报组ID', '警报原因']
                 
                 all_keep_cols = added_cols_to_keep + base_cols_to_keep
                 
@@ -362,116 +667,23 @@ def index():
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv'), index=False)
 
-            # 5. Merge Servers (Merge Requests)
-            logger.user("正在处理正常组的合并申请...")
-            fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-            swapped_log_data = [] 
+            final_plan_rows = merge_output_rows_by_target(build_output_rows_from_groups(plan_groups))
 
-            server_row_map = {}
-            for r_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                t_id = row[target_col_idx]
-                p_id = row[part_col_idx]
-                if t_id: server_row_map[t_id] = r_idx
-                if p_id: server_row_map[p_id] = r_idx
-                
-            actual_swapped_count = 0
-            
-            for s1, s2 in normal_groups:
-                r1_idx = server_row_map.get(s1)
-                r2_idx = server_row_map.get(s2)
-                
-                if r1_idx and r2_idx and r1_idx != r2_idx:
-                    actual_swapped_count += 1
-                    
-                    # Capture State Before Merge
-                    c1_t = ws.cell(row=r1_idx, column=target_col_idx+1)
-                    c1_p = ws.cell(row=r1_idx, column=part_col_idx+1)
-                    v1_t, v1_p = c1_t.value, c1_p.value
-                    
-                    c2_t = ws.cell(row=r2_idx, column=target_col_idx+1)
-                    c2_p = ws.cell(row=r2_idx, column=part_col_idx+1)
-                    v2_t, v2_p = c2_t.value, c2_p.value
-                    
-                    # Helper to format server pair string
-                    def fmt_pair(t, p):
-                        return f"[{t if t else '空'} + {p if p else '空'}]"
+            for r_idx in range(2, ws.max_row + 1):
+                ws.cell(row=r_idx, column=target_col_idx + 1).value = None
+                ws.cell(row=r_idx, column=part_col_idx + 1).value = None
 
-                    before_str_1 = fmt_pair(v1_t, v1_p)
-                    before_str_2 = fmt_pair(v2_t, v2_p)
+            for row in final_plan_rows:
+                anchor_row = row.get('anchor_row')
+                if anchor_row is None or anchor_row > ws.max_row:
+                    continue
 
-                    # --- MERGE LOGIC ---
-                    # Goal: Put s1 and s2 into Row 1. Put their leftovers (partners) into Row 2.
-                    
-                    # 1. Identify partners (leftovers)
-                    # If v1_t is s1, then v1_p is the partner. And vice versa.
-                    p1 = v1_p if v1_t == s1 else v1_t
-                    p2 = v2_p if v2_t == s2 else v2_t
-                    
-                    # 2. Assign new pairs
-                    # Row 1 gets s1 and s2 (The requested pair)
-                    # Row 2 gets p1 and p2 (The leftover pair)
-                    
-                    # Sort pairs (Small ID first)
-                    new_pair_1 = sorted([x for x in [s1, s2] if x is not None])
-                    new_pair_2 = sorted([x for x in [p1, p2] if x is not None])
-                    
-                    # 3. Update Cells
-                    # Row 1
-                    if len(new_pair_1) == 2:
-                        c1_t.value, c1_p.value = new_pair_1[0], new_pair_1[1]
-                        final_v1_t, final_v1_p = new_pair_1[0], new_pair_1[1]
-                    elif len(new_pair_1) == 1:
-                         c1_t.value, c1_p.value = new_pair_1[0], None
-                         final_v1_t, final_v1_p = new_pair_1[0], None
-                    else:
-                         c1_t.value, c1_p.value = None, None # Should not happen for s1, s2
-                         final_v1_t, final_v1_p = None, None
+                ws.cell(row=anchor_row, column=target_col_idx + 1).value = row['目标服']
+                ws.cell(row=anchor_row, column=part_col_idx + 1).value = row['参与服'] or None
 
-                    # Row 2
-                    if len(new_pair_2) == 2:
-                        c2_t.value, c2_p.value = new_pair_2[0], new_pair_2[1]
-                        final_v2_t, final_v2_p = new_pair_2[0], new_pair_2[1]
-                    elif len(new_pair_2) == 1:
-                         c2_t.value, c2_p.value = new_pair_2[0], None
-                         final_v2_t, final_v2_p = new_pair_2[0], None
-                    else:
-                         c2_t.value, c2_p.value = None, None
-                         final_v2_t, final_v2_p = None, None
-
-                    # Capture State After Swap
-                    after_str_1 = fmt_pair(final_v1_t, final_v1_p)
-                    after_str_2 = fmt_pair(final_v2_t, final_v2_p)
-                    
-                    # Human readable change log
-                    change_log = (
-                        f"组1 (行{r1_idx}): {before_str_1} ➔ {after_str_1} (合并目标)\n"
-                        f"   组2 (行{r2_idx}): {before_str_2} ➔ {after_str_2} (剩余自动组队)"
-                    )
-                    
-                    logger.user(f"✅ 成功合并 {s1} + {s2}\n   {change_log}", 'SUCCESS')
-                    
-                    swapped_log_data.append({
-                        '合并申请': f"{s1}+{s2}",
-                        '原始行号1': r1_idx, '原始行号2': r2_idx,
-                        'Before1': before_str_1, 'After1': after_str_1,
-                        'Before2': before_str_2, 'After2': after_str_2,
-                        '状态': '已合并'
-                    })
-                        
-                    for cell in ws[r1_idx]: cell.fill = fill
-                    for cell in ws[r2_idx]: cell.fill = fill
-
-                    # Update Map
-                    # Row 1 now contains s1 and s2
-                    if s1: server_row_map[s1] = r1_idx
-                    if s2: server_row_map[s2] = r1_idx
-                    # Row 2 now contains p1 and p2
-                    if p1: server_row_map[p1] = r2_idx
-                    if p2: server_row_map[p2] = r2_idx
-                    
-                    logger.dev(f"执行合并 ({s1}, {s2}) -> Row {r1_idx}, Leftovers ({p1}, {p2}) -> Row {r2_idx}")
-                else:
-                    logger.dev(f"无法合并 ({s1}, {s2}): 未找到匹配行或已在同一行")
+                if anchor_row in changed_anchor_rows:
+                    for cell in ws[anchor_row]:
+                        cell.fill = fill
 
             if swapped_log_data:
                 swapped_df = pd.DataFrame(swapped_log_data)
@@ -492,10 +704,10 @@ def index():
                                    result_xlsx='result_plan.xlsx',
                                    alert_count=len(alert_groups),
                                    secondary_alert_count=len(secondary_alert_groups),
-                                   swap_count=actual_swapped_count,
-                                   alert_preview=alert_groups, # Pass all for preview
+                                   swap_count=len(swapped_log_data),
+                                   alert_preview=alert_groups,
                                    secondary_alert_preview=secondary_alert_groups,
-                                   swap_preview=swapped_log_data) # Pass all for preview
+                                   swap_preview=swapped_log_data)
 
         except Exception as e:
             traceback.print_exc()

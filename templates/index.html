@@ -705,11 +705,7 @@
                         {% if alert_preview %}
                             {% for item in alert_preview %}
                             <div class="preview-item">
-                                <div class="ids">
-                                    <span>{{ item.ids[0] }}</span>
-                                    <span>↔</span>
-                                    <span>{{ item.ids[1] }}</span>
-                                </div>
+                                <div class="ids">{{ item.ids | join(' / ') }}</div>
                                 <div class="reason">{{ item.reason }}</div>
                             </div>
                             {% endfor %}
@@ -720,7 +716,7 @@
                 </div>
                 <div class="stat-card secondary">
                     <div class="stat-label">
-                        二次警报组 (DAU≤5)
+                        二次警报组 (DAU&lt;5)
                         <span class="stat-hint">悬停预览详情</span>
                     </div>
                     <div class="stat-value">{{ secondary_alert_count }}</div>
@@ -730,11 +726,7 @@
                         {% if secondary_alert_preview %}
                             {% for item in secondary_alert_preview %}
                             <div class="preview-item">
-                                <div class="ids">
-                                    <span>{{ item.ids[0] }}</span>
-                                    <span>↔</span>
-                                    <span>{{ item.ids[1] }}</span>
-                                </div>
+                                <div class="ids">{{ item.ids | join(' / ') }}</div>
                                 <div class="reason">{{ item.reason }}</div>
                             </div>
                             {% endfor %}
