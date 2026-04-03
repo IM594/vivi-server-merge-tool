@@ -329,7 +329,7 @@ def evaluate_primary_warning(server_info_source, s1, s2, total_servers):
         rank1 <= top_25_threshold and rank2 <= top_25_threshold and
         row1['最高玩家累充金额'] >= 5000 and row2['最高玩家累充金额'] >= 5000
     )
-    cond_power_close = abs(row1['前2名战力之和'] - row2['前2名战力之和']) <= 500000000
+    cond_power_close = abs(row1['前3名战力之和'] - row2['前3名战力之和']) <= 500000000
 
     reasons = []
     if cond_rank_close:
@@ -492,7 +492,7 @@ def index():
             logger.user(f"数据合并完成，共 {len(df)} 条记录")
             
             # Ensure numeric columns
-            cols_to_numeric = ['区服ID', '前2名战力之和', '最高玩家累充金额', 'DAU', '跨服ID', 'code', '有效DAU', '当天付费账号数', '峰值在线', 'MAC_DAU', 'IP_DAU', '账号DAU', '总注册角色']
+            cols_to_numeric = ['区服ID', '前3名战力之和', '最高玩家累充金额', 'DAU', '跨服ID', 'code', '有效DAU', '当天付费账号数', '峰值在线', 'MAC_DAU', 'IP_DAU', '账号DAU', '总注册角色']
             for col in cols_to_numeric:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -503,8 +503,8 @@ def index():
                             pass # Keep as float if int conversion fails (e.g. too large or weird values)
 
             # Sort
-            logger.dev("执行数据排序: 前2名战力之和 (降序)")
-            df = df.sort_values(by='前2名战力之和', ascending=False).reset_index(drop=True)
+            logger.dev("执行数据排序: 前3名战力之和 (降序)")
+            df = df.sort_values(by='前3名战力之和', ascending=False).reset_index(drop=True)
             df['真实排名'] = df.index + 1
             total_servers = len(df)
             server_info_map = build_server_info_map(df)
