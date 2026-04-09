@@ -109,7 +109,17 @@ def parse_server_ids_from_cell(value):
     if not text:
         return []
 
-    return [int(match) for match in re.findall(r'\d+', text)]
+    parsed_ids = []
+    for match in re.findall(r'\d+(?:\.\d+)?', text):
+        if '.' in match:
+            integer_part, fractional_part = match.split('.', 1)
+            if fractional_part.strip('0'):
+                continue
+            parsed_ids.append(int(integer_part))
+            continue
+        parsed_ids.append(int(match))
+
+    return parsed_ids
 
 def build_server_info_map(df):
     if '区服ID' not in df.columns:
@@ -417,6 +427,13 @@ def evaluate_secondary_dau_warning(server_info_source, leftover_members, primary
         'reason': reason
     }
 
+def build_empty_secondary_warning():
+    return {
+        'triggered': False,
+        'low_dau_ids': [],
+        'reason': ''
+    }
+
 def build_alert_row(row, group_id, reason, alert_type):
     row_dict = row.to_dict()
     row_dict['警报组ID'] = group_id
@@ -433,6 +450,70 @@ def build_alert_row(row, group_id, reason, alert_type):
             pass
 
     return row_dict
+
+def build_secondary_alert_preview_item(requested_group, leftover_group, secondary_warning):
+    requested_ids = list(requested_group.get('members', [])) if requested_group else []
+    reason_parts = []
+
+    if leftover_group:
+        reason_parts.append(f"剩余组 {format_group_label(leftover_group)}")
+
+    warning_reason = secondary_warning.get('reason', '') if secondary_warning else ''
+    if warning_reason:
+        reason_parts.append(warning_reason)
+
+    return {
+        'ids': requested_ids,
+        'reason': "；".join(reason_parts)
+    }
+
+def determine_swap_status(primary_warning, secondary_warning):
+    if primary_warning['triggered'] and secondary_warning['triggered']:
+        return '预警已排除'
+    if primary_warning['triggered']:
+        return '常规预警已排除'
+    if secondary_warning['triggered']:
+        return '二次预警已排除'
+    return '成功合并'
+
+def process_merge_request(plan_groups, s1, s2, server_info_source, total_servers):
+    primary_warning = evaluate_primary_warning(server_info_source, s1, s2, total_servers)
+    candidate_groups, regroup_result = regroup_for_requested_pair(plan_groups, s1, s2)
+    if regroup_result['status'] != 'ok':
+        return {
+            'status': regroup_result['status'],
+            'committed': False,
+            'plan_groups': plan_groups,
+            'primary_warning': primary_warning,
+            'secondary_warning': build_empty_secondary_warning(),
+            'regroup_result': regroup_result,
+            'requested_group': None,
+            'leftover_group': None,
+            'swap_status': '未找到来源组已跳过',
+        }
+
+    requested_group = regroup_result['requested_group']
+    leftover_group = regroup_result['leftover_group']
+    secondary_warning = evaluate_secondary_dau_warning(
+        server_info_source,
+        leftover_group['members'] if leftover_group else [],
+        primary_warning['triggered']
+    )
+    swap_status = determine_swap_status(primary_warning, secondary_warning)
+    committed = swap_status == '成功合并'
+
+    return {
+        'status': 'ok',
+        'committed': committed,
+        'plan_groups': candidate_groups if committed else plan_groups,
+        'candidate_groups': candidate_groups,
+        'primary_warning': primary_warning,
+        'secondary_warning': secondary_warning,
+        'regroup_result': regroup_result,
+        'requested_group': requested_group,
+        'leftover_group': leftover_group,
+        'swap_status': swap_status,
+    }
 
 def build_output_rows_from_groups(groups):
     output_rows = []
@@ -486,6 +567,41 @@ def merge_output_rows_by_target(rows):
 
     merged_rows.sort(key=lambda item: item.get('anchor_row', float('inf')))
     return merged_rows
+
+def assign_output_write_rows(rows, max_row, start_row=2):
+    assigned_rows = []
+    used_rows = set()
+    next_append_row = max(max_row + 1, start_row)
+
+    for row in rows:
+        assigned_row = dict(row)
+        preferred_row = assigned_row.get('anchor_row')
+        write_row = None
+
+        if preferred_row is not None and start_row <= preferred_row <= max_row and preferred_row not in used_rows:
+            write_row = preferred_row
+        else:
+            search_start = preferred_row if preferred_row is not None else start_row
+            for candidate_row in range(max(search_start, start_row), max_row + 1):
+                if candidate_row not in used_rows:
+                    write_row = candidate_row
+                    break
+
+            if write_row is None:
+                for candidate_row in range(start_row, min(max(search_start, start_row), max_row + 1)):
+                    if candidate_row not in used_rows:
+                        write_row = candidate_row
+                        break
+
+            if write_row is None:
+                write_row = next_append_row
+                next_append_row += 1
+
+        used_rows.add(write_row)
+        assigned_row['write_row'] = write_row
+        assigned_rows.append(assigned_row)
+
+    return assigned_rows
 
 def exclude_alert_groups_from_plan(groups, primary_alert_groups, secondary_alert_groups):
     excluded_group_members = set()
@@ -583,6 +699,7 @@ def index():
 
             alert_groups = []
             secondary_alert_groups = []
+            secondary_alert_preview = []
             final_alert_rows = []
             swapped_log_data = []
             changed_anchor_rows = set()
@@ -590,24 +707,30 @@ def index():
 
             logger.dev("开始执行重组与双阶段预警")
             for s1, s2 in input_pairs:
-                primary_warning = evaluate_primary_warning(server_info_map, s1, s2, total_servers)
+                merge_result = process_merge_request(plan_groups, s1, s2, server_info_map, total_servers)
+                primary_warning = merge_result['primary_warning']
                 if primary_warning['missing_ids']:
                     for missing_id in primary_warning['missing_ids']:
                         logger.user(f"警告：区服 {missing_id} 缺少数值数据，本次仅执行重组，不参与预警判定", 'WARN')
 
-                plan_groups, regroup_result = regroup_for_requested_pair(plan_groups, s1, s2)
-                if regroup_result['status'] != 'ok':
+                regroup_result = merge_result['regroup_result']
+                if merge_result['status'] != 'ok' or regroup_result is None:
                     logger.user(f"警告：区服对 {s1}, {s2} 未能在计划表中找到完整来源组合，已跳过重组", 'WARN')
                     continue
 
-                requested_group = regroup_result['requested_group']
-                leftover_group = regroup_result['leftover_group']
-                changed_anchor_rows.update(group['anchor_row'] for group in [requested_group, leftover_group] if group)
+                requested_group = merge_result['requested_group']
+                leftover_group = merge_result['leftover_group']
+                secondary_warning = merge_result['secondary_warning']
+                swap_status = merge_result['swap_status']
+
+                if merge_result['committed']:
+                    plan_groups = merge_result['plan_groups']
+                    changed_anchor_rows.update(group['anchor_row'] for group in [requested_group, leftover_group] if group)
 
                 reason_text = "；".join(primary_warning['reasons']) if primary_warning['reasons'] else "未触发常规预警"
                 logger.user(
-                    f"已重组 {s1} + {s2}：请求组 {format_group_label(requested_group)}；"
-                    f"剩余组 {format_group_label(leftover_group)}；常规预警：{reason_text}"
+                    f"已分析 {s1} + {s2}：请求组 {format_group_label(requested_group)}；"
+                    f"剩余组 {format_group_label(leftover_group)}；常规预警：{reason_text}；结果：{swap_status}"
                 )
 
                 if primary_warning['triggered']:
@@ -622,16 +745,14 @@ def index():
                                 build_alert_row(row, f"Primary_{min(s1, s2)}_{max(s1, s2)}", primary_reason, '常规预警')
                             )
 
-                secondary_warning = evaluate_secondary_dau_warning(
-                    server_info_map,
-                    leftover_group['members'] if leftover_group else [],
-                    primary_warning['triggered']
-                )
                 if secondary_warning['triggered'] and leftover_group:
                     secondary_alert_groups.append({
                         'ids': list(leftover_group['members']),
                         'reason': secondary_warning['reason']
                     })
+                    secondary_alert_preview.append(
+                        build_secondary_alert_preview_item(requested_group, leftover_group, secondary_warning)
+                    )
                     logger.user(
                         f"触发二次 DAU 预警：剩余组 {format_group_label(leftover_group)} - {secondary_warning['reason']}",
                         'WARN'
@@ -649,15 +770,6 @@ def index():
                                 )
                             )
 
-                if primary_warning['triggered'] and secondary_warning['triggered']:
-                    swap_status = '预警已排除'
-                elif primary_warning['triggered']:
-                    swap_status = '常规预警已排除'
-                elif secondary_warning['triggered']:
-                    swap_status = '二次预警已排除'
-                else:
-                    swap_status = '成功合并'
-
                 source_groups = regroup_result['source_groups']
                 swapped_log_data.append({
                     '合并申请': f"{s1}+{s2}",
@@ -669,12 +781,6 @@ def index():
                     'After2': format_group_label(leftover_group),
                     '状态': swap_status
                 })
-
-            logger.user(
-                f"处理完成：发现 {len(alert_groups)} 组常规预警，"
-                f"{len(secondary_alert_groups)} 组二次 DAU 预警，"
-                f"成功重组 {len(swapped_log_data)} 组"
-            )
 
             # Create Alert CSV with optimized formatting
             if final_alert_rows:
@@ -721,27 +827,27 @@ def index():
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv'), index=False)
 
-            final_plan_groups = exclude_alert_groups_from_plan(
-                plan_groups,
-                primary_alert_groups=alert_groups,
-                secondary_alert_groups=secondary_alert_groups
+            final_plan_rows = assign_output_write_rows(
+                merge_output_rows_by_target(build_output_rows_from_groups(plan_groups)),
+                max_row=ws.max_row,
+                start_row=2
             )
-            final_plan_rows = merge_output_rows_by_target(build_output_rows_from_groups(final_plan_groups))
 
-            for r_idx in range(2, ws.max_row + 1):
+            original_max_row = ws.max_row
+            for r_idx in range(2, original_max_row + 1):
                 ws.cell(row=r_idx, column=target_col_idx + 1).value = None
                 ws.cell(row=r_idx, column=part_col_idx + 1).value = None
 
             for row in final_plan_rows:
-                anchor_row = row.get('anchor_row')
-                if anchor_row is None or anchor_row > ws.max_row:
+                write_row = row.get('write_row')
+                if write_row is None:
                     continue
 
-                ws.cell(row=anchor_row, column=target_col_idx + 1).value = row['目标服']
-                ws.cell(row=anchor_row, column=part_col_idx + 1).value = row['参与服'] or None
+                ws.cell(row=write_row, column=target_col_idx + 1).value = row['目标服']
+                ws.cell(row=write_row, column=part_col_idx + 1).value = row['参与服'] or None
 
-                if anchor_row in changed_anchor_rows:
-                    for cell in ws[anchor_row]:
+                if row.get('anchor_row') in changed_anchor_rows:
+                    for cell in ws[write_row]:
                         cell.fill = fill
 
             if swapped_log_data:
@@ -752,6 +858,11 @@ def index():
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'swapped_log.csv'), index=False)
 
             successful_swap_logs = filter_successful_swap_logs(swapped_log_data)
+            logger.user(
+                f"处理完成：发现 {len(alert_groups)} 组常规预警，"
+                f"{len(secondary_alert_groups)} 组二次 DAU 预警，"
+                f"成功合并 {len(successful_swap_logs)} 组"
+            )
 
             output_xlsx_path = os.path.join(app.config['DOWNLOAD_FOLDER'], 'result_plan.xlsx')
             wb.save(output_xlsx_path)
@@ -767,7 +878,7 @@ def index():
                                    secondary_alert_count=len(secondary_alert_groups),
                                    swap_count=len(successful_swap_logs),
                                    alert_preview=alert_groups,
-                                   secondary_alert_preview=secondary_alert_groups,
+                                   secondary_alert_preview=secondary_alert_preview,
                                    swap_preview=successful_swap_logs)
 
         except Exception as e:

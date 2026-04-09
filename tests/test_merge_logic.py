@@ -35,13 +35,17 @@ if "openpyxl" not in sys.modules:
     sys.modules["openpyxl.styles"] = fake_styles
 
 from app import (
+    assign_output_write_rows,
     build_plan_groups,
+    build_secondary_alert_preview_item,
     evaluate_primary_warning,
     evaluate_secondary_dau_warning,
     exclude_alert_groups_from_plan,
     filter_successful_swap_logs,
     merge_output_rows_by_target,
     normalize_server_dataframe,
+    parse_server_ids_from_cell,
+    process_merge_request,
     regroup_for_requested_pair,
 )
 
@@ -100,6 +104,53 @@ class MergeLogicTests(unittest.TestCase):
         )
         self.assertEqual(change["leftover_group"]["members"], [30])
 
+    def test_process_merge_request_keeps_original_groups_when_alert_triggered(self):
+        groups = [
+            {"target": 11, "members": [11, 33], "row_indices": [2], "anchor_row": 2},
+            {"target": 22, "members": [22, 44], "row_indices": [3], "anchor_row": 3},
+        ]
+        df = pd.DataFrame(
+            [
+                {"区服ID": 11, "真实排名": 1, "最高玩家累充金额": 8000, "前2名战力之和": 1_000_000_000, "DAU": 30},
+                {"区服ID": 22, "真实排名": 3, "最高玩家累充金额": 9000, "前2名战力之和": 1_100_000_000, "DAU": 20},
+                {"区服ID": 33, "真实排名": 10, "最高玩家累充金额": 500, "前2名战力之和": 200_000_000, "DAU": 4},
+                {"区服ID": 44, "真实排名": 11, "最高玩家累充金额": 500, "前2名战力之和": 210_000_000, "DAU": 6},
+            ]
+        )
+
+        result = process_merge_request(groups, 11, 22, df, total_servers=12)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["committed"])
+        self.assertEqual(result["swap_status"], "预警已排除")
+        self.assertEqual(result["plan_groups"], groups)
+
+    def test_process_merge_request_allows_regroup_when_server_info_missing(self):
+        groups = [
+            {"target": 11, "members": [11, 33], "row_indices": [2], "anchor_row": 2},
+            {"target": 22, "members": [22, 44], "row_indices": [3], "anchor_row": 3},
+        ]
+        df = pd.DataFrame(
+            [
+                {"区服ID": 11, "真实排名": 1, "最高玩家累充金额": 8000, "前2名战力之和": 1_000_000_000, "DAU": 30},
+                {"区服ID": 33, "真实排名": 10, "最高玩家累充金额": 500, "前2名战力之和": 200_000_000, "DAU": 4},
+            ]
+        )
+
+        result = process_merge_request(groups, 11, 22, df, total_servers=12)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["committed"])
+        self.assertEqual(
+            result["plan_groups"],
+            [
+                {"target": 11, "members": [11, 22], "row_indices": [2], "anchor_row": 2},
+                {"target": 33, "members": [33, 44], "row_indices": [3], "anchor_row": 3},
+            ],
+        )
+        self.assertEqual(result["swap_status"], "成功合并")
+        self.assertEqual(result["primary_warning"]["missing_ids"], [22])
+
     def test_primary_and_secondary_warning_rules_follow_new_requirement(self):
         df = pd.DataFrame(
             [
@@ -136,6 +187,25 @@ class MergeLogicTests(unittest.TestCase):
         self.assertFalse(primary["triggered"])
         self.assertFalse(secondary["triggered"])
         self.assertEqual(secondary["low_dau_ids"], [])
+
+    def test_secondary_alert_preview_keeps_requested_pair_context(self):
+        requested_group = {"target": 442584, "members": [442584, 442633], "row_indices": [414], "anchor_row": 414}
+        leftover_group = {"target": 442519, "members": [442519, 442610], "row_indices": [478], "anchor_row": 478}
+        secondary_warning = {
+            "triggered": True,
+            "low_dau_ids": [442519],
+            "reason": "剩余组存在低 DAU 区服: 442519 DAU<5(3)",
+        }
+
+        preview_item = build_secondary_alert_preview_item(requested_group, leftover_group, secondary_warning)
+
+        self.assertEqual(preview_item["ids"], [442584, 442633])
+        self.assertIn("剩余组 442519 -> 442610", preview_item["reason"])
+        self.assertIn("442519 DAU<5(3)", preview_item["reason"])
+
+    def test_parse_server_ids_from_cell_ignores_float_suffix_zero(self):
+        self.assertEqual(parse_server_ids_from_cell("442584.0"), [442584])
+        self.assertEqual(parse_server_ids_from_cell("442584.0,442633.0"), [442584, 442633])
 
     def test_normalize_server_dataframe_ranks_by_top2_power_sum(self):
         df = pd.DataFrame(
@@ -187,6 +257,24 @@ class MergeLogicTests(unittest.TestCase):
             successful_logs,
             [
                 {"合并申请": "1001+1002", "状态": "成功合并"},
+            ],
+        )
+
+    def test_assign_output_write_rows_allocates_unique_rows_for_same_anchor(self):
+        rows = [
+            {"目标服": 10, "参与服": "20", "anchor_row": 2},
+            {"目标服": 30, "参与服": "", "anchor_row": 2},
+            {"目标服": 40, "参与服": "50", "anchor_row": 5},
+        ]
+
+        assigned_rows = assign_output_write_rows(rows, max_row=5, start_row=2)
+
+        self.assertEqual(
+            assigned_rows,
+            [
+                {"目标服": 10, "参与服": "20", "anchor_row": 2, "write_row": 2},
+                {"目标服": 30, "参与服": "", "anchor_row": 2, "write_row": 3},
+                {"目标服": 40, "参与服": "50", "anchor_row": 5, "write_row": 5},
             ],
         )
 
