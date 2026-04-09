@@ -448,6 +448,23 @@ def merge_output_rows_by_target(rows):
     merged_rows.sort(key=lambda item: item.get('anchor_row', float('inf')))
     return merged_rows
 
+def exclude_alert_groups_from_plan(groups, primary_alert_groups, secondary_alert_groups):
+    excluded_group_members = set()
+
+    for alert_group in primary_alert_groups + secondary_alert_groups:
+        ids = alert_group.get('ids') or []
+        normalized_ids = tuple(sorted(set(int(server_id) for server_id in ids)))
+        if normalized_ids:
+            excluded_group_members.add(normalized_ids)
+
+    if not excluded_group_members:
+        return groups
+
+    return [
+        group for group in groups
+        if tuple(sorted(set(group.get('members', [])))) not in excluded_group_members
+    ]
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -667,7 +684,12 @@ def index():
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'alert_result.csv'), index=False)
 
-            final_plan_rows = merge_output_rows_by_target(build_output_rows_from_groups(plan_groups))
+            final_plan_groups = exclude_alert_groups_from_plan(
+                plan_groups,
+                primary_alert_groups=alert_groups,
+                secondary_alert_groups=secondary_alert_groups
+            )
+            final_plan_rows = merge_output_rows_by_target(build_output_rows_from_groups(final_plan_groups))
 
             for r_idx in range(2, ws.max_row + 1):
                 ws.cell(row=r_idx, column=target_col_idx + 1).value = None

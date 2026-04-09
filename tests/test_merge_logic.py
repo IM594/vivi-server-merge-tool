@@ -1,11 +1,44 @@
+import sys
+import types
 import unittest
 
 import pandas as pd
+
+if "flask" not in sys.modules:
+    fake_flask = types.ModuleType("flask")
+
+    class _FakeFlask:
+        def __init__(self, *args, **kwargs):
+            self.config = {}
+
+        def route(self, *args, **kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
+    fake_flask.Flask = _FakeFlask
+    fake_flask.render_template = lambda *args, **kwargs: None
+    fake_flask.request = types.SimpleNamespace(files=None, form=None, method="GET")
+    fake_flask.send_file = lambda *args, **kwargs: None
+    fake_flask.send_from_directory = lambda *args, **kwargs: None
+    sys.modules["flask"] = fake_flask
+
+if "openpyxl" not in sys.modules:
+    fake_openpyxl = types.ModuleType("openpyxl")
+    fake_styles = types.ModuleType("openpyxl.styles")
+
+    fake_openpyxl.load_workbook = lambda *args, **kwargs: None
+    fake_styles.PatternFill = lambda *args, **kwargs: None
+
+    sys.modules["openpyxl"] = fake_openpyxl
+    sys.modules["openpyxl.styles"] = fake_styles
 
 from app import (
     build_plan_groups,
     evaluate_primary_warning,
     evaluate_secondary_dau_warning,
+    exclude_alert_groups_from_plan,
     merge_output_rows_by_target,
     regroup_for_requested_pair,
 )
@@ -101,6 +134,26 @@ class MergeLogicTests(unittest.TestCase):
         self.assertFalse(primary["triggered"])
         self.assertFalse(secondary["triggered"])
         self.assertEqual(secondary["low_dau_ids"], [])
+
+    def test_exclude_primary_and_secondary_alert_groups_from_result(self):
+        groups = [
+            {"target": 61158, "members": [61158, 64182], "row_indices": [7], "anchor_row": 7},
+            {"target": 64166, "members": [64166, 64193], "row_indices": [12], "anchor_row": 12},
+            {"target": 70001, "members": [70001, 70002], "row_indices": [15], "anchor_row": 15},
+        ]
+
+        filtered_groups = exclude_alert_groups_from_plan(
+            groups,
+            primary_alert_groups=[{"ids": [61158, 64182], "reason": "排名接近(差5)"}],
+            secondary_alert_groups=[{"ids": [64166, 64193], "reason": "剩余组存在低 DAU 区服"}],
+        )
+
+        self.assertEqual(
+            filtered_groups,
+            [
+                {"target": 70001, "members": [70001, 70002], "row_indices": [15], "anchor_row": 15},
+            ],
+        )
 
     def test_merge_output_rows_by_target_deduplicates_and_joins_participants(self):
         rows = [
