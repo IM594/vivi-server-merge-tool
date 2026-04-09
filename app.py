@@ -465,6 +465,9 @@ def exclude_alert_groups_from_plan(groups, primary_alert_groups, secondary_alert
         if tuple(sorted(set(group.get('members', [])))) not in excluded_group_members
     ]
 
+def filter_successful_swap_logs(swapped_log_data):
+    return [item for item in swapped_log_data if item.get('状态') == '成功合并']
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -621,6 +624,15 @@ def index():
                                 )
                             )
 
+                if primary_warning['triggered'] and secondary_warning['triggered']:
+                    swap_status = '预警已排除'
+                elif primary_warning['triggered']:
+                    swap_status = '常规预警已排除'
+                elif secondary_warning['triggered']:
+                    swap_status = '二次预警已排除'
+                else:
+                    swap_status = '成功合并'
+
                 source_groups = regroup_result['source_groups']
                 swapped_log_data.append({
                     '合并申请': f"{s1}+{s2}",
@@ -630,7 +642,7 @@ def index():
                     'After1': format_group_label(requested_group),
                     'Before2': format_group_label(source_groups[1]) if len(source_groups) > 1 else '同组拆分',
                     'After2': format_group_label(leftover_group),
-                    '状态': '已重组'
+                    '状态': swap_status
                 })
 
             logger.user(
@@ -714,6 +726,8 @@ def index():
             else:
                 pd.DataFrame().to_csv(os.path.join(app.config['DOWNLOAD_FOLDER'], 'swapped_log.csv'), index=False)
 
+            successful_swap_logs = filter_successful_swap_logs(swapped_log_data)
+
             output_xlsx_path = os.path.join(app.config['DOWNLOAD_FOLDER'], 'result_plan.xlsx')
             wb.save(output_xlsx_path)
             logger.user("所有任务处理完成！", 'SUCCESS')
@@ -726,10 +740,10 @@ def index():
                                    result_xlsx='result_plan.xlsx',
                                    alert_count=len(alert_groups),
                                    secondary_alert_count=len(secondary_alert_groups),
-                                   swap_count=len(swapped_log_data),
+                                   swap_count=len(successful_swap_logs),
                                    alert_preview=alert_groups,
                                    secondary_alert_preview=secondary_alert_groups,
-                                   swap_preview=swapped_log_data)
+                                   swap_preview=successful_swap_logs)
 
         except Exception as e:
             traceback.print_exc()

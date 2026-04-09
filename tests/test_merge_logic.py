@@ -39,6 +39,7 @@ from app import (
     evaluate_primary_warning,
     evaluate_secondary_dau_warning,
     exclude_alert_groups_from_plan,
+    filter_successful_swap_logs,
     merge_output_rows_by_target,
     regroup_for_requested_pair,
 )
@@ -152,6 +153,23 @@ class MergeLogicTests(unittest.TestCase):
             filtered_groups,
             [
                 {"target": 70001, "members": [70001, 70002], "row_indices": [15], "anchor_row": 15},
+            ],
+        )
+
+    def test_filter_successful_swap_logs_excludes_alerted_requests(self):
+        swapped_log_data = [
+            {"合并申请": "1001+1002", "状态": "成功合并"},
+            {"合并申请": "2001+2002", "状态": "常规预警已排除"},
+            {"合并申请": "3001+3002", "状态": "二次预警已排除"},
+            {"合并申请": "4001+4002", "状态": "预警已排除"},
+        ]
+
+        successful_logs = filter_successful_swap_logs(swapped_log_data)
+
+        self.assertEqual(
+            successful_logs,
+            [
+                {"合并申请": "1001+1002", "状态": "成功合并"},
             ],
         )
 
