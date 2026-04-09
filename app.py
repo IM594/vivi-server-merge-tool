@@ -29,7 +29,24 @@ os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['DOWNLOAD_FOLDER'] = DOWNLOAD_FOLDER
 
+POWER_SUM_COLUMN = '前2名战力之和'
 ID_LIKE_COLUMNS = ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']
+SERVER_NUMERIC_COLUMNS = [
+    '区服ID',
+    POWER_SUM_COLUMN,
+    '前3名战力之和',
+    '最高玩家累充金额',
+    'DAU',
+    '跨服ID',
+    'code',
+    '有效DAU',
+    '当天付费账号数',
+    '峰值在线',
+    'MAC_DAU',
+    'IP_DAU',
+    '账号DAU',
+    '总注册角色',
+]
 
 class ExecutionLogger:
     def __init__(self):
@@ -100,6 +117,28 @@ def build_server_info_map(df):
 
     deduped_df = df.drop_duplicates(subset=['区服ID'], keep='first')
     return {int(row['区服ID']): row for _, row in deduped_df.iterrows()}
+
+def normalize_server_dataframe(df, logger=None):
+    df = df.copy()
+
+    for col in SERVER_NUMERIC_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            if col in ID_LIKE_COLUMNS:  # ID 或计数字段尽量保持整数，避免展示与匹配异常
+                try:
+                    df[col] = df[col].astype(int)
+                except Exception:
+                    pass
+
+    if POWER_SUM_COLUMN not in df.columns:
+        raise KeyError(f"缺少关键字段: {POWER_SUM_COLUMN}")
+
+    if logger is not None:
+        logger.dev(f"执行数据排序: {POWER_SUM_COLUMN} (降序)")
+
+    df = df.sort_values(by=POWER_SUM_COLUMN, ascending=False).reset_index(drop=True)
+    df['真实排名'] = df.index + 1
+    return df
 
 def get_server_info(server_info_source, server_id):
     if isinstance(server_info_source, dict):
@@ -329,7 +368,7 @@ def evaluate_primary_warning(server_info_source, s1, s2, total_servers):
         rank1 <= top_25_threshold and rank2 <= top_25_threshold and
         row1['最高玩家累充金额'] >= 5000 and row2['最高玩家累充金额'] >= 5000
     )
-    cond_power_close = abs(row1['前3名战力之和'] - row2['前3名战力之和']) <= 500000000
+    cond_power_close = abs(row1[POWER_SUM_COLUMN] - row2[POWER_SUM_COLUMN]) <= 500000000
 
     reasons = []
     if cond_rank_close:
@@ -511,21 +550,7 @@ def index():
             df = pd.concat(dfs, ignore_index=True)
             logger.user(f"数据合并完成，共 {len(df)} 条记录")
             
-            # Ensure numeric columns
-            cols_to_numeric = ['区服ID', '前3名战力之和', '最高玩家累充金额', 'DAU', '跨服ID', 'code', '有效DAU', '当天付费账号数', '峰值在线', 'MAC_DAU', 'IP_DAU', '账号DAU', '总注册角色']
-            for col in cols_to_numeric:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                    if col in ['区服ID', 'DAU', '跨服ID', 'code', '总注册角色', '峰值在线', '当天付费账号数']: # Explicitly cast ID-like or count-like fields to int
-                         try:
-                            df[col] = df[col].astype(int)
-                         except:
-                            pass # Keep as float if int conversion fails (e.g. too large or weird values)
-
-            # Sort
-            logger.dev("执行数据排序: 前3名战力之和 (降序)")
-            df = df.sort_values(by='前3名战力之和', ascending=False).reset_index(drop=True)
-            df['真实排名'] = df.index + 1
+            df = normalize_server_dataframe(df, logger)
             total_servers = len(df)
             server_info_map = build_server_info_map(df)
             

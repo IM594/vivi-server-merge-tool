@@ -41,6 +41,7 @@ from app import (
     exclude_alert_groups_from_plan,
     filter_successful_swap_logs,
     merge_output_rows_by_target,
+    normalize_server_dataframe,
     regroup_for_requested_pair,
 )
 
@@ -102,10 +103,10 @@ class MergeLogicTests(unittest.TestCase):
     def test_primary_and_secondary_warning_rules_follow_new_requirement(self):
         df = pd.DataFrame(
             [
-                {"区服ID": 11, "真实排名": 1, "最高玩家累充金额": 8000, "前3名战力之和": 1_000_000_000, "DAU": 30},
-                {"区服ID": 22, "真实排名": 3, "最高玩家累充金额": 9000, "前3名战力之和": 1_100_000_000, "DAU": 20},
-                {"区服ID": 33, "真实排名": 10, "最高玩家累充金额": 500, "前3名战力之和": 200_000_000, "DAU": 4},
-                {"区服ID": 44, "真实排名": 11, "最高玩家累充金额": 500, "前3名战力之和": 210_000_000, "DAU": 5},
+                {"区服ID": 11, "真实排名": 1, "最高玩家累充金额": 8000, "前2名战力之和": 1_000_000_000, "前3名战力之和": 1_000_000_000, "DAU": 30},
+                {"区服ID": 22, "真实排名": 3, "最高玩家累充金额": 9000, "前2名战力之和": 1_100_000_000, "前3名战力之和": 1_700_000_000, "DAU": 20},
+                {"区服ID": 33, "真实排名": 10, "最高玩家累充金额": 500, "前2名战力之和": 200_000_000, "前3名战力之和": 200_000_000, "DAU": 4},
+                {"区服ID": 44, "真实排名": 11, "最高玩家累充金额": 500, "前2名战力之和": 210_000_000, "前3名战力之和": 210_000_000, "DAU": 5},
             ]
         )
 
@@ -123,9 +124,9 @@ class MergeLogicTests(unittest.TestCase):
     def test_secondary_warning_skips_when_primary_not_triggered(self):
         df = pd.DataFrame(
             [
-                {"区服ID": 11, "真实排名": 20, "最高玩家累充金额": 100, "前3名战力之和": 100, "DAU": 30},
-                {"区服ID": 22, "真实排名": 50, "最高玩家累充金额": 100, "前3名战力之和": 9_000_000_000, "DAU": 30},
-                {"区服ID": 33, "真实排名": 80, "最高玩家累充金额": 100, "前3名战力之和": 50, "DAU": 1},
+                {"区服ID": 11, "真实排名": 20, "最高玩家累充金额": 100, "前2名战力之和": 100, "前3名战力之和": 5_000_000_000, "DAU": 30},
+                {"区服ID": 22, "真实排名": 50, "最高玩家累充金额": 100, "前2名战力之和": 9_000_000_000, "前3名战力之和": 5_000_000_100, "DAU": 30},
+                {"区服ID": 33, "真实排名": 80, "最高玩家累充金额": 100, "前2名战力之和": 50, "前3名战力之和": 50, "DAU": 1},
             ]
         )
 
@@ -135,6 +136,22 @@ class MergeLogicTests(unittest.TestCase):
         self.assertFalse(primary["triggered"])
         self.assertFalse(secondary["triggered"])
         self.assertEqual(secondary["low_dau_ids"], [])
+
+    def test_normalize_server_dataframe_ranks_by_top2_power_sum(self):
+        df = pd.DataFrame(
+            [
+                {"区服ID": "11", "前2名战力之和": "100", "前3名战力之和": "999", "DAU": "3"},
+                {"区服ID": "22", "前2名战力之和": "300", "前3名战力之和": "100", "DAU": "7"},
+                {"区服ID": "33", "前2名战力之和": "200", "前3名战力之和": "500", "DAU": "5"},
+            ]
+        )
+
+        normalized = normalize_server_dataframe(df)
+
+        self.assertEqual(list(normalized["区服ID"]), [22, 33, 11])
+        self.assertEqual(list(normalized["真实排名"]), [1, 2, 3])
+        self.assertTrue(pd.api.types.is_integer_dtype(normalized["区服ID"]))
+        self.assertTrue(pd.api.types.is_integer_dtype(normalized["DAU"]))
 
     def test_exclude_primary_and_secondary_alert_groups_from_result(self):
         groups = [
